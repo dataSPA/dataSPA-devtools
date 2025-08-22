@@ -14,7 +14,8 @@ SSE messages.
 - Highlighting of elements using signals.
 - Editing signal values.
 
-
+<video width="320" height="240" src="./DevTools.mp4" type="video/mp4">
+</video>
 
 ## Contributing
 
