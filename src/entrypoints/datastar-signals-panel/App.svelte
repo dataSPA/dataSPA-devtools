@@ -42,8 +42,4 @@
         margin: 0 auto;
         padding: 2rem;
     }
-    td {
-        padding: 0.25rem;
-        padding-right: 1rem;
-    }
 </style>

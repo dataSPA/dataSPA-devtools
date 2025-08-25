@@ -1,7 +1,7 @@
 import { storage } from "#imports";
 
 export default defineContentScript({
-  matches: ["*://*/"],
+  matches: ["*://*/*"],
   async main(ctx) {
     let elm = document.createElement("div");
     elm.setAttribute("id", "dsDevtoolsContent");
@@ -22,8 +22,6 @@ export default defineContentScript({
         uuid = crypto.randomUUID();
         window.__domCache.set(uuid, evt.detail.el);
       }
-      console.log('fetch details', evt.detail);
-      console.log(uuid);
       document.dispatchEvent(
         new CustomEvent("dsDevtools:sseEvent", {
         detail: {
@@ -46,7 +44,6 @@ export default defineContentScript({
       fallback: [],
     });
     document.addEventListener("dsDevtools:sseEventFlush", async (evt) => {
-      console.log("flushing events", evt.detail);
       await sseEvents.setValue(evt.detail);
     });
   },

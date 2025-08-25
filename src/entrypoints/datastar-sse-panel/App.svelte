@@ -6,6 +6,12 @@
 
     let parser = new DOMParser();
 
+    function attributeString(element: Element): string {
+        return Array.from(element.attributes)
+            .map((attr) => `${attr.name}="${attr.value}"`)
+            .join(" ");
+    }
+
     let storeA = createStore("[]", "session:sseEvents");
     let sseEvents = derived(storeA, ($s) => JSON.parse($s));
     let showing = $state(false);
@@ -82,7 +88,7 @@
                                         {event.argsRaw.mode}
                                     </td>
                                     <td>
-                                        {event.argsRaw.elements}
+                                        {event.argsRaw.elements.trim()}
                                     </td>
                                 {:else}
                                     <td>&nbsp;</td>
@@ -113,7 +119,8 @@
                     <ul>
                         {#each node.children as child}
                             <li>
-                                {child.nodeName} - {child.children.length}
+                                &lt;{child.nodeName.toLowerCase()}
+                                {attributeString(child)}&gt;
                                 {@render treeNode(child)}
                             </li>
                         {/each}
@@ -122,7 +129,8 @@
                 <ul>
                     {#each detailDocument.children as child}
                         <li>
-                            {child.nodeName} - {child.children.length}
+                            &lt;{child.nodeName.toLowerCase()}
+                            {attributeString(child)}&gt;
                             {@render treeNode(child)}
                         </li>
                     {/each}
@@ -162,10 +170,11 @@
         padding: 0.2rem;
         margin: 0;
     }
-    table {
+    /*table {
         width: 100%;
     }
 
+    */
     table thead {
         position: sticky;
         top: 0;
@@ -175,23 +184,24 @@
     td {
         padding: 0.25rem;
         padding-right: 1rem;
+        padding-top: 0;
+        padding-bottom: 0;
         text-align: left;
         text-overflow: ellipsis;
-        width: 100%;
+        width: auto;
         overflow: hidden;
         white-space: nowrap;
     }
-    tbody {
-        display: block;
-        overflow-y: scroll;
-    }
+    /*
     tr {
+        width: auto;
         display: table;
         text-align: left;
     }
     tr > td {
-        width: 10rem;
-    }
+        width: auto;
+        text-align: left;
+    }*/
     main {
         display: flex;
         flex-direction: column;
@@ -203,5 +213,13 @@
         min-height: 50vh;
         max-height: 50vh;
         overflow-y: auto;
+        font-family: monospace;
+    }
+    .details li {
+        list-style: none;
+        padding-left: 0;
+    }
+    .details ul {
+        padding-left: 1rem;
     }
 </style>

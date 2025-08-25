@@ -25,7 +25,6 @@ export default defineUnlistedScript(() => {
   });
 
   document.addEventListener("dsDevtools:sseEvent", async (evt) => {
-    console.log("putting an event in the buffer");
     window.__eventsBuffer.push(evt.detail);
     if (window.__eventsBufferFlusherTimer) {
       clearTimeout(window.__eventsBufferFlusherTimer);
