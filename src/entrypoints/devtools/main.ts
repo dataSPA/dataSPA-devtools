@@ -1,11 +1,11 @@
 browser.devtools.panels.create(
-  "Datastar Signals",
+  "dataSPA Signals",
   "icon/128.png",
   "datastar-signals-panel.html",
 );
 
 browser.devtools.panels.create(
-  "Datastar SSE Events",
+  "dataSPA SSE Events",
   "icon/128.png",
   "datastar-sse-panel.html",
 );
