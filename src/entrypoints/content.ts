@@ -1,50 +1,33 @@
 import { storage } from "#imports";
+import { PublicPath } from "wxt/browser";
 
 export default defineContentScript({
   matches: ["*://*/*"],
   async main(ctx) {
-    let elm = document.createElement("div");
-    elm.setAttribute("id", "dsDevtoolsContent");
-    elm.setAttribute("style", "display: none;");
-    elm.setAttribute("data-json-signals", "");
-    elm.setAttribute("data-signals-devtools.nested", "'test'");
-    elm.setAttribute(
-      "data-on-signal-patch",
-      `document.dispatchEvent(
-        new CustomEvent("dsDevtools:signals", {
-          detail: dsDevtoolsContent.textContent,
-        }));`,
-    );
-    elm.setAttribute(
-      "data-on-datastar-fetch",
-      `let uuid = window.getCachedElement(evt.detail.el);
-      if (!uuid) {
-        uuid = crypto.randomUUID();
-        window.__domCache.set(uuid, evt.detail.el);
+    browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      console.log("Got a message from the devtools", msg);
+      if (msg.action === "getPageInfo") {
+        const info = { title: document.title };
+        browser.runtime.sendMessage(info);
       }
-      document.dispatchEvent(
-        new CustomEvent("dsDevtools:sseEvent", {
-        detail: {
-        type: evt.detail.type,
-        el: uuid,
-        argsRaw: evt.detail.argsRaw,
-        }}));
-      `,
-    );
-
-    document.body.appendChild(elm);
-    await injectScript("/injected.js", { keepInDom: true });
-    let signals = storage.defineItem("session:signals", { fallback: {} });
-
-    ctx.addEventListener(document, "dsDevtools:signals", async ({ detail }) => {
-      await signals.setValue(detail);
     });
-
-    let sseEvents = storage.defineItem<Array<Object>>("session:sseEvents", {
-      fallback: [],
+    window.addEventListener("message", async (event) => {
+      if (event.source !== window) return;
+      if (event.data.type === "datastar-fetch") {
+        await browser.runtime.sendMessage({ data: JSON.stringify(event.data) });
+      }
     });
-    document.addEventListener("dsDevtools:sseEventFlush", async (evt) => {
-      await sseEvents.setValue(evt.detail);
-    });
+    const script = document.createElement("script");
+    script.src = browser.runtime.getURL("injected.js" as PublicPath);
+    (document.head || document.documentElement).appendChild(script);
+    const style = document.createElement("style");
+    style.id = "dataSPADevtoolsHighlightStyle";
+    style.textContent = `
+      .dataSPADevtoolsHighlightStyle {
+        outline: 3px solid magenta !important;
+        outline-offset: -3px !important;
+      }
+    `;
+    document.head.appendChild(style);
   },
 });

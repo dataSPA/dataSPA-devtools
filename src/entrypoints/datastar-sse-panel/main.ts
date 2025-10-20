@@ -1,9 +1,26 @@
-import { mount } from 'svelte';
-import App from './App.svelte';
-import './app.css';
+import { mount } from "svelte";
+import App from "./App.svelte";
+import "./app.css";
+import { sseMessages } from "$lib/stores.ts";
 
 const app = mount(App, {
-  target: document.getElementById('app')!,
+  target: document.getElementById("app")!,
+});
+
+const port = browser.runtime.connect({ name: "dataSPAdevtools" });
+
+port.onMessage.addListener((message: any) => {
+  if (!message.data) return;
+  const data = JSON.parse(message.data);
+  if (data.type !== "datastar-fetch") return;
+  const dataData = { ...JSON.parse(data.data), el: data.el };
+  console.log("SSE panel received message:", dataData);
+  sseMessages.update((m) => [...m, dataData]);
+});
+
+port.postMessage({
+  tabId: browser.devtools.inspectedWindow.tabId,
+  action: "getPageInfo",
 });
 
 export default app;

@@ -1,16 +1,15 @@
 <script lang="ts">
     import svelteLogo from "../../assets/svelte.svg";
     import Counter from "../../lib/Counter.svelte";
-    import { createStore } from "../../lib/store";
+    import { signalMessages } from "$lib/stores";
     import { derived } from "svelte/store";
 
-    let storeA = createStore("{}", "session:signals");
-    let signals = derived(storeA, ($s) => JSON.parse($s));
+    // let signals = derived(storeA, ($s) => JSON.parse($s));
 </script>
 
 <main>
     <h2>Signals</h2>
-    {#snippet treeNode(node)}
+    {#snippet treeNode(node: object)}
         <ul>
             {#each Object.entries(node) as [key, value]}
                 <li>
@@ -24,7 +23,7 @@
         </ul>
     {/snippet}
     <ul>
-        {#each Object.entries($signals) as [key, value]}
+        {#each Object.entries($signalMessages) as [key, value]}
             <li>
                 {key}:
                 {#if typeof value === "object"}

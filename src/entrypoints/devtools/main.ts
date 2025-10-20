@@ -9,7 +9,4 @@ browser.devtools.panels.create(
   "icon/128.png",
   "datastar-sse-panel.html",
 );
-
-// browser.devtools.panels.elements.createSidebarPane("Example Pane", (pane) => {
-//   pane.setPage("devtools-pane.html");
-// });
+//

@@ -1,38 +1,26 @@
-<script lang="ts">
-    import { Pane, Splitpanes } from "svelte-splitpanes";
-    import { SvelteMap } from "svelte/reactivity";
-    import * as Table from "$lib/components/ui/table/index.ts";
-    import { Button } from "$lib/components/ui/button/index.js";
-    import { Separator } from "$lib/components/ui/separator/index.js";
-    import PanelBottomClose from "@lucide/svelte/icons/panel-bottom-close";
-    import Crosshair from "@lucide/svelte/icons/crosshair";
+<script module lang="ts">
+    declare const chrome: any;
+</script>
 
-    import { createStore } from "../../lib/store";
+<script lang="ts">
+    import ElementViewer from "./ElementViewer.svelte";
+    import { Pane, Splitpanes } from "svelte-splitpanes";
+    import { sseMessages } from "$lib/stores";
+    import type { SSEEvent } from "$lib/types";
+
+    import { createHighlightToggleStore } from "../../lib/stores";
     import { derived } from "svelte/store";
 
-    let nodeCollapsed = new SvelteMap();
+    const port = browser.runtime.connect({ name: "dataSPAdevtools" });
 
-    let toggleChild = (child: any) => {
-        nodeCollapsed.set(child, !!!nodeCollapsed.get(child));
-    };
+    port.onMessage.addListener((msg) => {
+        console.log(
+            "I'm the SSE Panel. I got a message from background:",
+            JSON.parse(msg.data),
+        );
+    });
 
-    function attributeString(element: Element): string {
-        let ret = Array.from(element.attributes)
-            .map((attr) => `${attr.name}="${attr.value}"`)
-            .join(" ");
-        if (ret.length > 0) {
-            return " " + ret;
-        }
-        return "";
-    }
-
-    let storeA = createStore("[]", "session:sseEvents");
-    let sseEvents = derived(storeA, ($s) => JSON.parse($s));
-    let showing = $state(false);
-
-    let selectors = [];
-
-    function highlightSelectors() {
+    function highlightSelectors(selectors: string[]) {
         for (const selector of selectors) {
             if (selector === "DOCUMENT") {
                 continue; // TODO
@@ -66,7 +54,7 @@
           return "Highlighted " + "${selector}";
         })();
       `,
-                    (result, exceptionInfo) => {
+                    (result: any, exceptionInfo: any) => {
                         if (exceptionInfo && exceptionInfo.isException) {
                             console.error("Eval failed:", exceptionInfo);
                         } else {
@@ -76,6 +64,62 @@
                 );
             }
         }
+    }
+
+    function documentFragmentFromEvent(
+        event: SSEEvent,
+    ): DocumentFragment | null {
+        if (!event) {
+            return null;
+        }
+        if (!event.argsRaw) {
+            return null;
+        }
+        if (!event.argsRaw.elements) {
+            return null;
+        }
+
+        const detailContent = event.argsRaw.elements;
+        const elementsWithSvgsRemoved = detailContent.replace(
+            /<svg(\s[^>]*>|>)([\s\S]*?)<\/svg>/gim,
+            "",
+        );
+        const hasHtml = /<\/html>/.test(elementsWithSvgsRemoved);
+        const hasHead = /<\/head>/.test(elementsWithSvgsRemoved);
+        const hasBody = /<\/body>/.test(elementsWithSvgsRemoved);
+
+        const newDocument = new DOMParser().parseFromString(
+            hasHtml || hasHead || hasBody
+                ? detailContent
+                : `<body><template>${detailContent}</template></body>`,
+            "text/html",
+        );
+        let newContent = document.createDocumentFragment();
+        if (hasHtml) {
+            newContent.appendChild(newDocument.documentElement);
+        } else if (hasHead && hasBody) {
+            newContent.appendChild(newDocument.head);
+            newContent.appendChild(newDocument.body);
+        } else if (hasHead) {
+            newContent.appendChild(newDocument.head);
+        } else if (hasBody) {
+            newContent.appendChild(newDocument.body);
+        } else {
+            newContent = newDocument.querySelector("template")!.content;
+        }
+
+        return newContent;
+    }
+
+    // let storeA = createStore<any[]>([], "session:sseEvents");
+    // let sseEvents = derived(storeA, ($s) => $s);
+    let highlightToggle = createHighlightToggleStore();
+    let showing = $state(false);
+
+    // let selectors: string[] = [];
+
+    function closePane() {
+        showing = false;
     }
 
     function removeHighlights() {
@@ -98,7 +142,7 @@
           return "Removed highlights";
         })();
       `,
-            (result, exceptionInfo) => {
+            (result: any, exceptionInfo: any) => {
                 if (exceptionInfo && exceptionInfo.isException) {
                     console.error("Eval failed:", exceptionInfo);
                 } else {
@@ -106,6 +150,57 @@
                 }
             },
         );
+    }
+
+    // Automatic highlight function for SSE events
+    function autoHighlightSelectors(selectors: string[]) {
+        // Remove existing highlights first
+        removeHighlights();
+
+        // Highlight new selectors
+        for (const selector of selectors) {
+            if (
+                selector === "DOCUMENT" ||
+                selector === "BODY" ||
+                selector === "HEAD"
+            ) {
+                continue; // TODO
+            } else {
+                chrome.devtools.inspectedWindow.eval(
+                    `
+        (function() {
+          var el = document.querySelector('${selector}');
+          if (!el) return "Element not found";
+
+          // Inject CSS once
+          if (!document.getElementById("___myHighlightStyle")) {
+            var style = document.createElement("style");
+            style.id = "___myHighlightStyle";
+            style.textContent = \`
+              .___myHighlight {
+                outline: 3px solid magenta !important;
+                outline-offset: -3px !important;
+              }
+            \`;
+            document.head.appendChild(style);
+          }
+
+          // Apply highlight class
+          el.classList.add("___myHighlight");
+
+          return "Highlighted " + "${selector}";
+        })();
+      `,
+                    (result: any, exceptionInfo: any) => {
+                        if (exceptionInfo && exceptionInfo.isException) {
+                            console.error("Eval failed:", exceptionInfo);
+                        } else {
+                            console.log("Result:", result);
+                        }
+                    },
+                );
+            }
+        }
     }
 
     // let highlightTarget = async () => {
@@ -130,13 +225,12 @@
     //     }
     // };
 
-    let getSelector = (event: object): string => {
+    let getSelector = (event: any) => {
         if (event.argsRaw && event.argsRaw.selector) {
-            selectors = [event.argsRaw.selector];
-            return;
+            return [event.argsRaw.selector];
         }
 
-        selectors = [];
+        let selectors = [];
 
         for (const child of detailDocument.children) {
             if (child instanceof HTMLHtmlElement) {
@@ -149,6 +243,8 @@
                 selectors.push(`#${child.id}`);
             }
         }
+
+        return selectors;
     };
 
     let detailContent = $state("");
@@ -182,83 +278,98 @@
         }
         return newContent;
     });
+
+    // Subscribe to SSE events and automatically highlight if enabled
+    // sseEvents.subscribe((events: any[]) => {
+    //     // Check if highlight toggle is enabled
+    //     highlightToggle.subscribe((enabled: boolean) => {
+    //         if (enabled && events.length > 0) {
+    //             // Get the latest event
+    //             const latestEvent = events[events.length - 1];
+    //             if (
+    //                 latestEvent.type != "started" &&
+    //                 latestEvent.type != "finished" &&
+    //                 latestEvent.argsRaw &&
+    //                 latestEvent.argsRaw.selector
+    //             ) {
+    //                 // Automatically highlight the selector
+    //                 autoHighlightSelectors([latestEvent.argsRaw.selector]);
+    //             }
+    //         }
+    //     });
+    // });
 </script>
 
 <div class="h-screen">
     <Splitpanes horizontal={true}>
         <Pane>
-            <div
-                class="overflow-y-auto min-w-0 h-full bg-zinc-800 text-gray-300 w-full"
-            >
-                <Table.Root class="table-auto">
+            <div>
+                <div>
+                    <h2>SSE Events</h2>
+                    <div>
+                        <label for="highlight-toggle">Highlight Elements</label>
+                        <input
+                            id="highlight-toggle"
+                            type="checkbox"
+                            bind:checked={$highlightToggle}
+                        />
+                    </div>
+                </div>
+                <table>
                     <colgroup>
-                        <col class="max-w-px w-full" />
-                        <col class="max-w-px w-full" />
-                        <col class="max-w-px w-full" />
+                        <col />
+                        <col />
+                        <col />
                         <col />
                     </colgroup>
-                    <Table.Header
-                        class="bg-zinc-800 text-gray-300 border-b border-gray-200"
-                    >
-                        <Table.Row>
-                            <Table.Head
-                                class="sticky top-0 bg-zinc-800 text-gray-300 border-b border-gray-200"
-                                >Type</Table.Head
-                            >
-                            <Table.Head
-                                class="sticky top-0 bg-zinc-800 text-gray-300 border-b border-gray-200"
-                                >Selector</Table.Head
-                            >
-                            <Table.Head
-                                class="sticky top-0 bg-zinc-800 text-gray-300 border-b border-gray-200"
-                                >Mode</Table.Head
-                            >
-                            <Table.Head
-                                class="sticky top-0 bg-zinc-800 text-gray-300 border-b border-gray-200"
-                                >Elements/Signals</Table.Head
-                            >
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                        {#each $storeA as event}
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Selector</th>
+                            <th>Mode</th>
+                            <th>Elements/Signals</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {#each $sseMessages as event}
                             {#if event.type != "started" && event.type != "finished"}
-                                <Table.Row
+                                <tr
                                     onclick={() => {
                                         removeHighlights();
                                         if (!showing) {
                                             showing = true;
                                         }
-                                        if (event.argsRaw.elements) {
+                                        if (
+                                            event.argsRaw &&
+                                            event.argsRaw.elements
+                                        ) {
                                             detailContent =
                                                 event.argsRaw.elements;
-                                            getSelector(event);
                                         } else {
-                                            selector = "";
+                                            // selectors = [""];
                                             detailContent = "";
                                         }
                                     }}
                                 >
-                                    <Table.Cell>
+                                    <td>
                                         {#if event.type == "datastar-patch-elements"}
-                                            patch
+                                            elements
                                         {:else if event.type == "datastar-patch-signals"}
                                             signals
                                         {:else}
                                             {event.type}
                                         {/if}
-                                    </Table.Cell>
+                                    </td>
                                     {#if event.argsRaw}
                                         {#if event.type == "datastar-patch-elements"}
-                                            <Table.Cell>
-                                                {event.argsRaw.selector}
-                                            </Table.Cell>
-                                            <Table.Cell>
+                                            <td>
+                                                {getSelector(event).join(", ")}
+                                            </td>
+                                            <td>
                                                 {event.argsRaw.mode}
-                                            </Table.Cell>
-                                            <Table.Cell class="min-w-0">
-                                                <span
-                                                    class="block overflow-hidden text-ellipsis"
-                                                >
+                                            </td>
+                                            <td>
+                                                <span>
                                                     {#if event.argsRaw.elements.trim().length > 50}
                                                         {event.argsRaw.elements
                                                             .trim()
@@ -270,79 +381,27 @@
                                                         {event.argsRaw.elements.trim()}
                                                     {/if}
                                                 </span>
-                                            </Table.Cell>
+                                            </td>
                                         {:else}
-                                            <Table.Cell>&nbsp;</Table.Cell>
-                                            <Table.Cell>&nbsp;</Table.Cell>
-                                            <Table.Cell class="truncate"
-                                                >&nbsp;</Table.Cell
-                                            >
+                                            <td>&nbsp;</td>
+                                            <td>&nbsp;</td>
+                                            <td>&nbsp;</td>
                                         {/if}
                                     {/if}
-                                </Table.Row>
+                                </tr>
                             {/if}
                         {/each}
-                    </Table.Body>
-                </Table.Root>
+                    </tbody>
+                </table>
             </div>
         </Pane>
         {#if showing}
             <Pane minSize={20}>
-                <div
-                    class="h-full overflow-y-auto px-2 bg-zinc-800 text-gray-300"
-                >
-                    <div class="flex justify-between">
-                        <Button
-                            variant="ghost"
-                            onclick={() => highlightSelectors()}
-                        >
-                            <Crosshair />
-                            Show selector target</Button
-                        >
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onclick={() => (showing = false)}
-                        >
-                            <PanelBottomClose />
-                        </Button>
-                    </div>
-                    <Separator class="my-1" />
-                    <div class="details font-mono">
-                        {#snippet treeNode(node)}
-                            <ul>
-                                {#each node.childNodes as child}
-                                    {#if child.nodeType === Node.TEXT_NODE}
-                                        {child.textContent}
-                                    {/if}
-                                {/each}
-                                {#each node.children as child}
-                                    <li>
-                                        <span
-                                            class={nodeCollapsed.get(child)
-                                                ? "cursor-pointer"
-                                                : "cursor-pointer inline-block rotate-90"}
-                                            onclick={() => toggleChild(child)}
-                                            >&#x25b6;
-                                        </span>
-                                        &lt;{child.nodeName.toLowerCase()}{attributeString(
-                                            child,
-                                        )}&gt;
-                                        {#if !nodeCollapsed.get(child)}
-                                            {@render treeNode(child)}
-                                            <span class="ml-2">
-                                                &lt;/{child.nodeName.toLowerCase()}&gt;
-                                            </span>
-                                        {/if}
-                                    </li>
-                                {/each}
-                            </ul>
-                        {/snippet}
-                        <ul>
-                            {@render treeNode(detailDocument)}
-                        </ul>
-                    </div>
-                </div>
+                <ElementViewer
+                    {detailDocument}
+                    {closePane}
+                    {highlightSelectors}
+                />
             </Pane>
         {/if}
     </Splitpanes>
