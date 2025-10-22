@@ -6,7 +6,22 @@ export default defineContentScript({
   async main(ctx) {
     browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       console.log("Got a message from the devtools", msg);
-      if (msg.action === "getPageInfo") {
+      switch (msg.action) {
+        case "highlightSelectors":
+        for (const selector of msg.data) {
+          for (const el of  document.querySelectorAll(selector)) {
+            el.classList.add("dataSPADevtoolsHighlightStyle");
+          }
+        }
+        break;
+        case "removeHighlights":
+        var els = document.querySelectorAll('.dataSPADevtoolsHighlightStyle');
+        if (!els) return "Element not found";
+        for (const el of els) {
+          el.classList.remove("dataSPADevtoolsHighlightStyle");
+        }
+        break;
+        case "getPageInfo":
         const info = { title: document.title };
         browser.runtime.sendMessage(info);
       }
@@ -24,10 +39,10 @@ export default defineContentScript({
     style.id = "dataSPADevtoolsHighlightStyle";
     style.textContent = `
       .dataSPADevtoolsHighlightStyle {
-        outline: 3px solid magenta !important;
-        outline-offset: -3px !important;
+      outline: 3px solid magenta !important;
+      outline-offset: -3px !important;
       }
-    `;
+      `;
     document.head.appendChild(style);
   },
 });

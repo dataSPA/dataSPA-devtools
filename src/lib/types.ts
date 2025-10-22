@@ -7,6 +7,17 @@ type SSEEvent = {
   };
 };
 
+type DSFetchEvent = CustomEvent<{
+  detail: {
+    el: HTMLElement;
+    rawArgs: string;
+  };
+}>;
+type DSFetchDetail = {
+  el: HTMLElement;
+  rawArgs: string;
+};
+
 type SignalEvent = {
   type: string;
   argsRaw?: {
@@ -16,4 +27,4 @@ type SignalEvent = {
   };
 };
 
-export { SSEEvent, SignalEvent };
+export { SSEEvent, SignalEvent, DSFetchEvent, DSFetchDetail };

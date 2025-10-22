@@ -16,11 +16,11 @@ export default defineBackground(() => {
 
       port.onMessage.addListener((msg) => {
         console.log("got some messages", msg);
-        const { tabId, action } = msg;
+        const { tabId, action, data } = msg;
         ports[tabId] = port;
 
         // Relay message to content script
-        browser.tabs.sendMessage(tabId, { action });
+        browser.tabs.sendMessage(tabId, { action, data });
       });
     }
   });

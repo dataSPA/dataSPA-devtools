@@ -6,64 +6,29 @@
     import ElementViewer from "./ElementViewer.svelte";
     import { Pane, Splitpanes } from "svelte-splitpanes";
     import { sseMessages } from "$lib/stores";
+    import { port } from "./main";
     import type { SSEEvent } from "$lib/types";
 
     import { createHighlightToggleStore } from "../../lib/stores";
     import { derived } from "svelte/store";
 
-    const port = browser.runtime.connect({ name: "dataSPAdevtools" });
+    // const port = browser.runtime.connect({ name: "dataSPAdevtools" });
 
-    port.onMessage.addListener((msg) => {
-        console.log(
-            "I'm the SSE Panel. I got a message from background:",
-            JSON.parse(msg.data),
-        );
+    onMount(() => {
+        port.onMessage.addListener((msg) => {
+            console.log(
+                "I'm the SSE Panel. I got a message from background:",
+                JSON.parse(msg.data),
+            );
+        });
     });
 
     function highlightSelectors(selectors: string[]) {
-        for (const selector of selectors) {
-            if (selector === "DOCUMENT") {
-                continue; // TODO
-            } else if (selector === "BODY") {
-                continue; // TODO
-            } else if (selector === "HEAD") {
-                continue; // TODO
-            } else {
-                chrome.devtools.inspectedWindow.eval(
-                    `
-        (function() {
-          var el = document.querySelector('${selector}');
-          if (!el) return "Element not found";
-
-          // Inject CSS once
-          if (!document.getElementById("___myHighlightStyle")) {
-            var style = document.createElement("style");
-            style.id = "___myHighlightStyle";
-            style.textContent = \`
-              .___myHighlight {
-                outline: 3px solid magenta !important;
-                outline-offset: -3px !important;
-              }
-            \`;
-            document.head.appendChild(style);
-          }
-
-          // Apply highlight class
-          el.classList.add("___myHighlight");
-
-          return "Highlighted " + "${selector}";
-        })();
-      `,
-                    (result: any, exceptionInfo: any) => {
-                        if (exceptionInfo && exceptionInfo.isException) {
-                            console.error("Eval failed:", exceptionInfo);
-                        } else {
-                            console.log("Result:", result);
-                        }
-                    },
-                );
-            }
-        }
+        port.postMessage({
+            tabId: browser.devtools.inspectedWindow.tabId,
+            action: "highlightSelectors",
+            data: selectors,
+        });
     }
 
     function documentFragmentFromEvent(
@@ -111,128 +76,34 @@
         return newContent;
     }
 
-    // let storeA = createStore<any[]>([], "session:sseEvents");
-    // let sseEvents = derived(storeA, ($s) => $s);
     let highlightToggle = createHighlightToggleStore();
     let showing = $state(false);
-
-    // let selectors: string[] = [];
+    let currentEvent = $state({} as SSEEvent);
 
     function closePane() {
         showing = false;
     }
 
     function removeHighlights() {
-        chrome.devtools.inspectedWindow.eval(
-            `
-        (function() {
-          var els = document.querySelectorAll('.___myHighlight');
-          if (!els) return "Element not found";
-
-          for (const el of els) {
-            el.classList.remove("___myHighlight");
-          }
-
-          // If no elements are using the class, remove the style tag
-          if (!document.querySelector(".___myHighlight")) {
-            var style = document.getElementById("___myHighlightStyle");
-            if (style) style.remove();
-          }
-
-          return "Removed highlights";
-        })();
-      `,
-            (result: any, exceptionInfo: any) => {
-                if (exceptionInfo && exceptionInfo.isException) {
-                    console.error("Eval failed:", exceptionInfo);
-                } else {
-                    console.log("Result:", result);
-                }
-            },
-        );
+        port.postMessage({
+            tabId: browser.devtools.inspectedWindow.tabId,
+            action: "removeHighlights",
+        });
     }
 
-    // Automatic highlight function for SSE events
-    function autoHighlightSelectors(selectors: string[]) {
-        // Remove existing highlights first
-        removeHighlights();
-
-        // Highlight new selectors
-        for (const selector of selectors) {
-            if (
-                selector === "DOCUMENT" ||
-                selector === "BODY" ||
-                selector === "HEAD"
-            ) {
-                continue; // TODO
-            } else {
-                chrome.devtools.inspectedWindow.eval(
-                    `
-        (function() {
-          var el = document.querySelector('${selector}');
-          if (!el) return "Element not found";
-
-          // Inject CSS once
-          if (!document.getElementById("___myHighlightStyle")) {
-            var style = document.createElement("style");
-            style.id = "___myHighlightStyle";
-            style.textContent = \`
-              .___myHighlight {
-                outline: 3px solid magenta !important;
-                outline-offset: -3px !important;
-              }
-            \`;
-            document.head.appendChild(style);
-          }
-
-          // Apply highlight class
-          el.classList.add("___myHighlight");
-
-          return "Highlighted " + "${selector}";
-        })();
-      `,
-                    (result: any, exceptionInfo: any) => {
-                        if (exceptionInfo && exceptionInfo.isException) {
-                            console.error("Eval failed:", exceptionInfo);
-                        } else {
-                            console.log("Result:", result);
-                        }
-                    },
-                );
-            }
-        }
-    }
-
-    // let highlightTarget = async () => {
-    //     for (const selector of selectors) {
-    //         if (selector === "DOCUMENT") {
-    //             chrome.devtools.inspectedWindow.eval(
-    //                 `console.log("replacing document");`,
-    //             );
-    //         } else if (selector === "BODY") {
-    //             chrome.devtools.inspectedWindow.eval(
-    //                 `console.log("replacing body");`,
-    //             );
-    //         } else if (selector === "HEAD") {
-    //             chrome.devtools.inspectedWindow.eval(
-    //                 `console.log("replacing head");`,
-    //             );
-    //         } else {
-    //             chrome.devtools.inspectedWindow.eval(
-    //                 `console.log("replacing element", document.getElementById("${selector}"));`,
-    //             );
-    //         }
-    //     }
-    // };
-
-    let getSelector = (event: any) => {
+    function getSelector(event: any) {
         if (event.argsRaw && event.argsRaw.selector) {
             return [event.argsRaw.selector];
         }
 
         let selectors = [];
 
-        for (const child of detailDocument.children) {
+        const doc = fragmentForEvent(event);
+        if (!doc) {
+            return [];
+        }
+
+        for (const child of doc.children) {
             if (child instanceof HTMLHtmlElement) {
                 selectors.push("DOCUMENT");
             } else if (child instanceof HTMLBodyElement) {
@@ -245,11 +116,10 @@
         }
 
         return selectors;
-    };
+    }
 
-    let detailContent = $state("");
-    let detailDocument = $derived.by(() => {
-        const elementsWithSvgsRemoved = detailContent.replace(
+    function fragmentFromElements(elements: string) {
+        const elementsWithSvgsRemoved = elements.replace(
             /<svg(\s[^>]*>|>)([\s\S]*?)<\/svg>/gim,
             "",
         );
@@ -259,8 +129,8 @@
 
         const newDocument = new DOMParser().parseFromString(
             hasHtml || hasHead || hasBody
-                ? detailContent
-                : `<body><template>${detailContent}</template></body>`,
+                ? elements
+                : `<body><template>${elements}</template></body>`,
             "text/html",
         );
         let newContent = document.createDocumentFragment();
@@ -277,27 +147,22 @@
             newContent = newDocument.querySelector("template")!.content;
         }
         return newContent;
-    });
+    }
 
-    // Subscribe to SSE events and automatically highlight if enabled
-    // sseEvents.subscribe((events: any[]) => {
-    //     // Check if highlight toggle is enabled
-    //     highlightToggle.subscribe((enabled: boolean) => {
-    //         if (enabled && events.length > 0) {
-    //             // Get the latest event
-    //             const latestEvent = events[events.length - 1];
-    //             if (
-    //                 latestEvent.type != "started" &&
-    //                 latestEvent.type != "finished" &&
-    //                 latestEvent.argsRaw &&
-    //                 latestEvent.argsRaw.selector
-    //             ) {
-    //                 // Automatically highlight the selector
-    //                 autoHighlightSelectors([latestEvent.argsRaw.selector]);
-    //             }
-    //         }
-    //     });
-    // });
+    function fragmentForEvent(event: SSEEvent) {
+        if (!event.argsRaw || !event.argsRaw.elements) {
+            return;
+        }
+
+        const elements = event.argsRaw.elements;
+
+        return fragmentFromElements(elements);
+    }
+
+    let detailContent = $state("");
+    let detailDocument = $derived.by(() => {
+        return fragmentFromElements(detailContent);
+    });
 </script>
 
 <div class="h-screen">
@@ -345,6 +210,7 @@
                                         ) {
                                             detailContent =
                                                 event.argsRaw.elements;
+                                            currentEvent = event;
                                         } else {
                                             // selectors = [""];
                                             detailContent = "";
@@ -370,15 +236,19 @@
                                             </td>
                                             <td>
                                                 <span>
-                                                    {#if event.argsRaw.elements.trim().length > 50}
-                                                        {event.argsRaw.elements
-                                                            .trim()
-                                                            .substring(
-                                                                0,
-                                                                50,
-                                                            )}&hellip;
-                                                    {:else}
-                                                        {event.argsRaw.elements.trim()}
+                                                    {#if event.argsRaw}
+                                                        {#if event.argsRaw.elements}
+                                                            {#if event.argsRaw.elements.trim().length > 50}
+                                                                {event.argsRaw.elements
+                                                                    .trim()
+                                                                    .substring(
+                                                                        0,
+                                                                        50,
+                                                                    )}&hellip;
+                                                            {:else}
+                                                                {event.argsRaw.elements.trim()}
+                                                            {/if}
+                                                        {/if}
                                                     {/if}
                                                 </span>
                                             </td>
@@ -400,7 +270,8 @@
                 <ElementViewer
                     {detailDocument}
                     {closePane}
-                    {highlightSelectors}
+                    highlightSelectors={() =>
+                        highlightSelectors(getSelector(currentEvent))}
                 />
             </Pane>
         {/if}

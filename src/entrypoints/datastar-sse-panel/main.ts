@@ -1,7 +1,7 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
 import "./app.css";
-import { sseMessages } from "$lib/stores.ts";
+import { sseMessages } from "$lib/stores";
 
 const app = mount(App, {
   target: document.getElementById("app")!,
@@ -23,4 +23,4 @@ port.postMessage({
   action: "getPageInfo",
 });
 
-export default app;
+export { app, port };

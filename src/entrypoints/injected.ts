@@ -1,6 +1,4 @@
-type DSFetchEvent = CustomEvent<{
-  detail: { el: HTMLElement; rawArgs: string };
-}>;
+import { DSFetchEvent, DSFetchDetail } from "../lib/types";
 
 function getElementSelector(element: HTMLElement) {
   if (element.id) {
@@ -98,16 +96,18 @@ function getUniqueSelector(element: HTMLElement) {
 }
 
 export default defineUnlistedScript(() => {
-  document.addEventListener("datastar-fetch", (event) => {
-    const element = (event as DSFetchEvent).detail.el;
+  document.addEventListener("datastar-fetch", ((
+    event: CustomEvent<DSFetchDetail>,
+  ) => {
+    const element = event.detail.el;
     const elementSelector = getUniqueSelector(element);
     window.postMessage(
       {
         type: "datastar-fetch",
         el: elementSelector,
-        data: JSON.stringify((event as DSFetchEvent).detail),
+        data: JSON.stringify(event.detail),
       },
       "*",
     );
-  });
+  }) as EventListener);
 });
