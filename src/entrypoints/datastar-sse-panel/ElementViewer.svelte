@@ -25,69 +25,91 @@
         return "";
     }
 
-
     function getSelectors() {
-
-      let selectors: string[] = [];
-      for (const child of detailDocument.children) {
-        if (child instanceof HTMLHtmlElement) {
-          selectors.push("DOCUMENT");
-        } else if (child instanceof HTMLBodyElement) {
-          selectors.push("BODY");
-        } else if (child instanceof HTMLHeadElement) {
-          selectors.push("HEAD");
-        } else {
-          selectors.push(`#${child.id}`);
+        let selectors: string[] = [];
+        for (const child of detailDocument.children) {
+            if (child instanceof HTMLHtmlElement) {
+                selectors.push("DOCUMENT");
+            } else if (child instanceof HTMLBodyElement) {
+                selectors.push("BODY");
+            } else if (child instanceof HTMLHeadElement) {
+                selectors.push("HEAD");
+            } else {
+                selectors.push(`#${child.id}`);
+            }
         }
-      }
 
-      return selectors;
-    };
+        return selectors;
+    }
 </script>
 
 <div>
-  <div>
-    <button onclick={() => highlightSelectors(getSelectors())}>
-      <Crosshair />
-      Show selector target</button
-    >
-    <button onclick={closePane}>
-      <PanelBottomClose />
-    </button>
-  </div>
-  <hr />
-  <div>
-    {#snippet treeNode(node: any)}
-      <ul>
-        {#each node.childNodes as child}
-          {#if child.nodeType === Node.TEXT_NODE}
-            {child.textContent}
-            {/if}
-          {/each}
-        {#each node.children as child}
-          <li>
-            <button
-              class={nodeCollapsed.get(child)
-              ? "cursor-pointer"
-              : "cursor-pointer inline-block rotate-90"}
-              onclick={() => toggleChild(child)}
-            >&#x25b6;
-            </button>
-            &lt;{child.nodeName.toLowerCase()}{attributeString(
-              child,
-            )}&gt;
-            {#if !nodeCollapsed.get(child)}
-              {@render treeNode(child)}
-              <span>
-                &lt;/{child.nodeName.toLowerCase()}&gt;
-              </span>
-              {/if}
-          </li>
-          {/each}
-      </ul>
-      {/snippet}
-    <ul>
-      {@render treeNode(detailDocument)}
-    </ul>
-  </div>
+    <div class="toolbar">
+        <button
+            class="icon-button"
+            onclick={() => highlightSelectors(getSelectors())}
+        >
+            <Crosshair />
+            Show selector target</button
+        >
+        <button onclick={closePane}>
+            <PanelBottomClose />
+        </button>
+    </div>
+    <hr />
+    <div>
+        {#snippet treeNode(node: any)}
+            <ul>
+                {#each node.childNodes as child}
+                    {#if child.nodeType === Node.TEXT_NODE}
+                        {child.textContent}
+                    {/if}
+                {/each}
+                {#each node.children as child}
+                    <li>
+                        <button
+                            class={nodeCollapsed.get(child)
+                                ? "cursor-pointer"
+                                : "cursor-pointer inline-block rotate-90"}
+                            onclick={() => toggleChild(child)}
+                            >&#x25b6;
+                        </button>
+                        &lt;{child.nodeName.toLowerCase()}{attributeString(
+                            child,
+                        )}&gt;
+                        {#if !nodeCollapsed.get(child)}
+                            {@render treeNode(child)}
+                            <span>
+                                &lt;/{child.nodeName.toLowerCase()}&gt;
+                            </span>
+                        {/if}
+                    </li>
+                {/each}
+            </ul>
+        {/snippet}
+        <ul>
+            {@render treeNode(detailDocument)}
+        </ul>
+    </div>
 </div>
+
+<style>
+    .icon-button {
+        display: flex;
+        align-items: center;
+        flex-direction: row;
+        gap: 5px;
+        justify-content: center;
+    }
+    .toolbar {
+        display: flex;
+        align-items: center;
+        flex-direction: row;
+        gap: 5px;
+        justify-content: space-between;
+        margin-inline: 0.5rem;
+    }
+    hr {
+        margin-block: 0.5rem;
+    }
+</style>

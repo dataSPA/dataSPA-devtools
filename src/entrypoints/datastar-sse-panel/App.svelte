@@ -6,22 +6,13 @@
     import ElementViewer from "./ElementViewer.svelte";
     import { Pane, Splitpanes } from "svelte-splitpanes";
     import { sseMessages } from "$lib/stores";
+    import CodeXml from "@lucide/svelte/icons/code-xml";
+    import Radio from "@lucide/svelte/icons/radio";
     import { port } from "./main";
-    import type { SSEEvent } from "$lib/types";
+    import type { DSFetchDetail, SSEEvent } from "$lib/types";
 
     import { createHighlightToggleStore } from "../../lib/stores";
     import { derived } from "svelte/store";
-
-    // const port = browser.runtime.connect({ name: "dataSPAdevtools" });
-
-    onMount(() => {
-        port.onMessage.addListener((msg) => {
-            console.log(
-                "I'm the SSE Panel. I got a message from background:",
-                JSON.parse(msg.data),
-            );
-        });
-    });
 
     function highlightSelectors(selectors: string[]) {
         port.postMessage({
@@ -148,6 +139,18 @@
         }
         return newContent;
     }
+    function selectEvent(event: SSEEvent) {
+        removeHighlights();
+        if (!showing) {
+            showing = true;
+        }
+        if (event.argsRaw && event.argsRaw.elements) {
+            detailContent = event.argsRaw.elements;
+            currentEvent = event;
+        } else {
+            detailContent = "";
+        }
+    }
 
     function fragmentForEvent(event: SSEEvent) {
         if (!event.argsRaw || !event.argsRaw.elements) {
@@ -165,122 +168,122 @@
     });
 </script>
 
-<div class="h-screen">
+<div class="container">
+    <header>
+        <label for="highlight-toggle">Highlight Elements</label>
+        <input
+            id="highlight-toggle"
+            type="checkbox"
+            bind:checked={$highlightToggle}
+        />
+    </header>
     <Splitpanes horizontal={true}>
         <Pane>
-            <div>
-                <div>
-                    <h2>SSE Events</h2>
-                    <div>
-                        <label for="highlight-toggle">Highlight Elements</label>
-                        <input
-                            id="highlight-toggle"
-                            type="checkbox"
-                            bind:checked={$highlightToggle}
-                        />
-                    </div>
-                </div>
-                <table>
-                    <colgroup>
-                        <col />
-                        <col />
-                        <col />
-                        <col />
-                    </colgroup>
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>Selector</th>
-                            <th>Mode</th>
-                            <th>Elements/Signals</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {#each $sseMessages as event}
-                            {#if event.type != "started" && event.type != "finished"}
-                                <tr
-                                    onclick={() => {
-                                        removeHighlights();
-                                        if (!showing) {
-                                            showing = true;
-                                        }
-                                        if (
-                                            event.argsRaw &&
-                                            event.argsRaw.elements
-                                        ) {
-                                            detailContent =
-                                                event.argsRaw.elements;
-                                            currentEvent = event;
-                                        } else {
-                                            // selectors = [""];
-                                            detailContent = "";
-                                        }
-                                    }}
-                                >
-                                    <td>
-                                        {#if event.type == "datastar-patch-elements"}
-                                            elements
-                                        {:else if event.type == "datastar-patch-signals"}
-                                            signals
-                                        {:else}
-                                            {event.type}
-                                        {/if}
-                                    </td>
-                                    {#if event.argsRaw}
-                                        {#if event.type == "datastar-patch-elements"}
-                                            <td>
-                                                {getSelector(event).join(", ")}
-                                            </td>
-                                            <td>
-                                                {event.argsRaw.mode}
-                                            </td>
-                                            <td>
-                                                <span>
-                                                    {#if event.argsRaw}
-                                                        {#if event.argsRaw.elements}
-                                                            {#if event.argsRaw.elements.trim().length > 50}
-                                                                {event.argsRaw.elements
-                                                                    .trim()
-                                                                    .substring(
-                                                                        0,
-                                                                        50,
-                                                                    )}&hellip;
-                                                            {:else}
-                                                                {event.argsRaw.elements.trim()}
-                                                            {/if}
-                                                        {/if}
-                                                    {/if}
-                                                </span>
-                                            </td>
-                                        {:else}
-                                            <td>&nbsp;</td>
-                                            <td>&nbsp;</td>
-                                            <td>&nbsp;</td>
-                                        {/if}
+            <div class="events-container">
+                <div class="events">
+                    {#each $sseMessages as event, index}
+                        {#if event.type != "started" && event.type != "finished"}
+                            <div
+                                class="event-row"
+                                tabindex={index}
+                                role="row"
+                                onkeydown={() => {
+                                    selectEvent(event);
+                                }}
+                                onclick={() => {
+                                    selectEvent(event);
+                                }}
+                            >
+                                <div>
+                                    {#if event.type == "datastar-patch-elements"}
+                                        <CodeXml />
+                                    {:else if event.type == "datastar-patch-signals"}
+                                        <Radio />
+                                    {:else}
+                                        {event.type}
                                     {/if}
-                                </tr>
-                            {/if}
-                        {/each}
-                    </tbody>
-                </table>
+                                </div>
+                                {#if event.argsRaw}
+                                    {#if event.type == "datastar-patch-elements"}
+                                        <div>
+                                            {getSelector(event).join(", ")}
+                                        </div>
+                                        <div>
+                                            {event.argsRaw.mode}
+                                        </div>
+                                        <div>
+                                            {#if event.argsRaw}
+                                                {#if event.argsRaw.elements}
+                                                    {#if event.argsRaw.elements.trim().length > 50}
+                                                        {event.argsRaw.elements
+                                                            .trim()
+                                                            .substring(
+                                                                0,
+                                                                50,
+                                                            )}&hellip;
+                                                    {:else}
+                                                        {event.argsRaw.elements.trim()}
+                                                    {/if}
+                                                {/if}
+                                            {/if}
+                                        </div>
+                                    {:else}
+                                        <div>&nbsp;></div>
+                                    {/if}
+                                {/if}
+                            </div>
+                        {/if}
+                    {/each}
+                </div>
             </div>
         </Pane>
         {#if showing}
-            <Pane minSize={20}>
-                <ElementViewer
-                    {detailDocument}
-                    {closePane}
-                    highlightSelectors={() =>
-                        highlightSelectors(getSelector(currentEvent))}
-                />
+            <Pane>
+                <div class="details">
+                    <ElementViewer
+                        {detailDocument}
+                        {closePane}
+                        highlightSelectors={() =>
+                            highlightSelectors(getSelector(currentEvent))}
+                    />
+                </div>
             </Pane>
         {/if}
     </Splitpanes>
 </div>
 
 <style>
-    ul {
-        /*@apply list-disc list-inside;*/
-        padding-left: 1rem;
+    .event-row {
+        display: contents;
+        cursor: pointer;
     }
+    .events-container {
+        overflow-y: scroll;
+        height: 100%;
+    }
+
+    .events {
+        display: grid;
+        margin-top: 5px;
+        gap: 5px;
+        grid-template-columns: repeat(4, max-content);
+        grid-auto-rows: max-content;
+    }
+
+    .container {
+        height: 100vh;
+    }
+    header {
+        position: sticky;
+        top: 0;
+        left: 0;
+        background-color: #fff;
+        padding: 5px;
+        margin: 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        height: min-content;
+    }
+    /*.details {
+        min-height: 50cqh;
+    }*/
 </style>

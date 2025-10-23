@@ -5,17 +5,19 @@ type SSEEvent = {
     elements?: string;
     mode?: string;
   };
+  el?: string;
 };
 
 type DSFetchEvent = CustomEvent<{
   detail: {
     el: HTMLElement;
-    rawArgs: string;
+    argsRaw: string;
   };
 }>;
+
 type DSFetchDetail = {
   el: HTMLElement;
-  rawArgs: string;
+  argsRaw: string;
 };
 
 type SignalEvent = {
