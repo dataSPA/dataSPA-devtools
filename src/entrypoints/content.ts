@@ -5,25 +5,28 @@ export default defineContentScript({
   matches: ["*://*/*"],
   async main(ctx) {
     browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-      console.log("Got a message from the devtools", msg);
       switch (msg.action) {
+        case "sendToConsole":
+          const element = document.querySelector(msg.data.el);
+          console.log({ ...msg.data, el: element });
+          break;
         case "highlightSelectors":
-        for (const selector of msg.data) {
-          for (const el of  document.querySelectorAll(selector)) {
-            el.classList.add("dataSPADevtoolsHighlightStyle");
+          for (const selector of msg.data) {
+            for (const el of document.querySelectorAll(selector)) {
+              el.classList.add("dataSPADevtoolsHighlightStyle");
+            }
           }
-        }
-        break;
+          break;
         case "removeHighlights":
-        var els = document.querySelectorAll('.dataSPADevtoolsHighlightStyle');
-        if (!els) return "Element not found";
-        for (const el of els) {
-          el.classList.remove("dataSPADevtoolsHighlightStyle");
-        }
-        break;
+          var els = document.querySelectorAll(".dataSPADevtoolsHighlightStyle");
+          if (!els) return "Element not found";
+          for (const el of els) {
+            el.classList.remove("dataSPADevtoolsHighlightStyle");
+          }
+          break;
         case "getPageInfo":
-        const info = { title: document.title };
-        browser.runtime.sendMessage(info);
+          const info = { title: document.title };
+          browser.runtime.sendMessage(info);
       }
     });
     window.addEventListener("message", async (event) => {

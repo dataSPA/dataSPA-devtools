@@ -14,7 +14,6 @@ port.onMessage.addListener((message: any) => {
   const data = JSON.parse(message.data);
   if (data.type !== "datastar-fetch") return;
   const dataData = { ...JSON.parse(data.data), el: data.el };
-  console.log("SSE panel received message:", dataData);
   sseMessages.update((m) => [...m, dataData]);
 });
 

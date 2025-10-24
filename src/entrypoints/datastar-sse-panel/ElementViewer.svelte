@@ -5,9 +5,13 @@
 <script lang="ts">
     import PanelBottomClose from "@lucide/svelte/icons/panel-bottom-close";
     import Crosshair from "@lucide/svelte/icons/crosshair";
+    import Terminal from "@lucide/svelte/icons/terminal";
+    import Clipboard from "@lucide/svelte/icons/clipboard";
     import { SvelteMap } from "svelte/reactivity";
+    import { documentFragmentFromEvent } from "$lib/helpers";
 
-    let { detailDocument, closePane, highlightSelectors } = $props();
+    let { detailDocument, port, closePane, highlightSelectors, currentEvent } =
+        $props();
 
     let nodeCollapsed = new SvelteMap();
 
@@ -41,6 +45,29 @@
 
         return selectors;
     }
+
+    function sendToConsole(event: Event) {
+        port.postMessage({
+            tabId: browser.devtools.inspectedWindow.tabId,
+            action: "sendToConsole",
+            data: event,
+        });
+    }
+
+    async function copyToClipboard(event: Event) {
+        const docFragment = documentFragmentFromEvent(event);
+        if (!docFragment) return;
+        const serializer = new XMLSerializer();
+        const xmlnAttribute = ' xmlns="http://www.w3.org/1999/xhtml"';
+        const regEx = new RegExp(xmlnAttribute, "g");
+        let newStr = serializer.serializeToString(docFragment);
+        newStr = newStr.replace(regEx, "");
+        port.postMessage({
+            tabId: browser.devtools.inspectedWindow.tabId,
+            action: "copyToClipboard",
+            data: newStr,
+        });
+    }
 </script>
 
 <div>
@@ -51,6 +78,17 @@
         >
             <Crosshair />
             Show selector target</button
+        >
+        <button class="icon-button" onclick={() => sendToConsole(currentEvent)}>
+            <Terminal />
+            Send event to console</button
+        >
+        <button
+            class="icon-button"
+            onclick={() => copyToClipboard(currentEvent)}
+        >
+            <Clipboard />
+            Copy content to clipboard</button
         >
         <button onclick={closePane}>
             <PanelBottomClose />

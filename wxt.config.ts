@@ -16,7 +16,7 @@ export default defineConfig({
         resources: ["injected.js"],
       },
     ],
-    permissions: ["storage"],
+    permissions: ["storage", "offscreen", "clipboardWrite"],
   },
   vite: () => ({
     plugins: [tailwindcss() as any],

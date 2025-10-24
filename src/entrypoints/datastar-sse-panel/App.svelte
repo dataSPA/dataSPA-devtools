@@ -6,13 +6,13 @@
     import ElementViewer from "./ElementViewer.svelte";
     import { Pane, Splitpanes } from "svelte-splitpanes";
     import { sseMessages } from "$lib/stores";
-    import CodeXml from "@lucide/svelte/icons/code-xml";
-    import Radio from "@lucide/svelte/icons/radio";
     import { port } from "./main";
-    import type { DSFetchDetail, SSEEvent } from "$lib/types";
+    import type { SSEEvent } from "$lib/types";
 
     import { createHighlightToggleStore } from "../../lib/stores";
+    import { fragmentFromElements } from "$lib/helpers";
     import { derived } from "svelte/store";
+    import EventRow from "./EventRow.svelte";
 
     function highlightSelectors(selectors: string[]) {
         port.postMessage({
@@ -20,51 +20,6 @@
             action: "highlightSelectors",
             data: selectors,
         });
-    }
-
-    function documentFragmentFromEvent(
-        event: SSEEvent,
-    ): DocumentFragment | null {
-        if (!event) {
-            return null;
-        }
-        if (!event.argsRaw) {
-            return null;
-        }
-        if (!event.argsRaw.elements) {
-            return null;
-        }
-
-        const detailContent = event.argsRaw.elements;
-        const elementsWithSvgsRemoved = detailContent.replace(
-            /<svg(\s[^>]*>|>)([\s\S]*?)<\/svg>/gim,
-            "",
-        );
-        const hasHtml = /<\/html>/.test(elementsWithSvgsRemoved);
-        const hasHead = /<\/head>/.test(elementsWithSvgsRemoved);
-        const hasBody = /<\/body>/.test(elementsWithSvgsRemoved);
-
-        const newDocument = new DOMParser().parseFromString(
-            hasHtml || hasHead || hasBody
-                ? detailContent
-                : `<body><template>${detailContent}</template></body>`,
-            "text/html",
-        );
-        let newContent = document.createDocumentFragment();
-        if (hasHtml) {
-            newContent.appendChild(newDocument.documentElement);
-        } else if (hasHead && hasBody) {
-            newContent.appendChild(newDocument.head);
-            newContent.appendChild(newDocument.body);
-        } else if (hasHead) {
-            newContent.appendChild(newDocument.head);
-        } else if (hasBody) {
-            newContent.appendChild(newDocument.body);
-        } else {
-            newContent = newDocument.querySelector("template")!.content;
-        }
-
-        return newContent;
     }
 
     let highlightToggle = createHighlightToggleStore();
@@ -109,36 +64,6 @@
         return selectors;
     }
 
-    function fragmentFromElements(elements: string) {
-        const elementsWithSvgsRemoved = elements.replace(
-            /<svg(\s[^>]*>|>)([\s\S]*?)<\/svg>/gim,
-            "",
-        );
-        const hasHtml = /<\/html>/.test(elementsWithSvgsRemoved);
-        const hasHead = /<\/head>/.test(elementsWithSvgsRemoved);
-        const hasBody = /<\/body>/.test(elementsWithSvgsRemoved);
-
-        const newDocument = new DOMParser().parseFromString(
-            hasHtml || hasHead || hasBody
-                ? elements
-                : `<body><template>${elements}</template></body>`,
-            "text/html",
-        );
-        let newContent = document.createDocumentFragment();
-        if (hasHtml) {
-            newContent.appendChild(newDocument.documentElement);
-        } else if (hasHead && hasBody) {
-            newContent.appendChild(newDocument.head);
-            newContent.appendChild(newDocument.body);
-        } else if (hasHead) {
-            newContent.appendChild(newDocument.head);
-        } else if (hasBody) {
-            newContent.appendChild(newDocument.body);
-        } else {
-            newContent = newDocument.querySelector("template")!.content;
-        }
-        return newContent;
-    }
     function selectEvent(event: SSEEvent) {
         removeHighlights();
         if (!showing) {
@@ -183,55 +108,12 @@
                 <div class="events">
                     {#each $sseMessages as event, index}
                         {#if event.type != "started" && event.type != "finished"}
-                            <div
-                                class="event-row"
-                                tabindex={index}
-                                role="row"
-                                onkeydown={() => {
-                                    selectEvent(event);
-                                }}
-                                onclick={() => {
-                                    selectEvent(event);
-                                }}
-                            >
-                                <div>
-                                    {#if event.type == "datastar-patch-elements"}
-                                        <CodeXml />
-                                    {:else if event.type == "datastar-patch-signals"}
-                                        <Radio />
-                                    {:else}
-                                        {event.type}
-                                    {/if}
-                                </div>
-                                {#if event.argsRaw}
-                                    {#if event.type == "datastar-patch-elements"}
-                                        <div>
-                                            {getSelector(event).join(", ")}
-                                        </div>
-                                        <div>
-                                            {event.argsRaw.mode}
-                                        </div>
-                                        <div>
-                                            {#if event.argsRaw}
-                                                {#if event.argsRaw.elements}
-                                                    {#if event.argsRaw.elements.trim().length > 50}
-                                                        {event.argsRaw.elements
-                                                            .trim()
-                                                            .substring(
-                                                                0,
-                                                                50,
-                                                            )}&hellip;
-                                                    {:else}
-                                                        {event.argsRaw.elements.trim()}
-                                                    {/if}
-                                                {/if}
-                                            {/if}
-                                        </div>
-                                    {:else}
-                                        <div>&nbsp;></div>
-                                    {/if}
-                                {/if}
-                            </div>
+                            <EventRow
+                                {event}
+                                {index}
+                                {getSelector}
+                                {selectEvent}
+                            />
                         {/if}
                     {/each}
                 </div>
@@ -243,6 +125,8 @@
                     <ElementViewer
                         {detailDocument}
                         {closePane}
+                        {currentEvent}
+                        {port}
                         highlightSelectors={() =>
                             highlightSelectors(getSelector(currentEvent))}
                     />
@@ -253,9 +137,9 @@
 </div>
 
 <style>
-    .event-row {
-        display: contents;
-        cursor: pointer;
+    :global(body) {
+        margin: 0;
+        background-color: light-dark(white, grey);
     }
     .events-container {
         overflow-y: scroll;
@@ -265,7 +149,7 @@
     .events {
         display: grid;
         margin-top: 5px;
-        gap: 5px;
+        /*gap: 5px;*/
         grid-template-columns: repeat(4, max-content);
         grid-auto-rows: max-content;
     }
@@ -283,7 +167,4 @@
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         height: min-content;
     }
-    /*.details {
-        min-height: 50cqh;
-    }*/
 </style>
