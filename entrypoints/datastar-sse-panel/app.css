@@ -1,0 +1,8 @@
+wa-split-panel {
+    height: 400px;
+}
+
+wa-split-panel div[slot="start"],
+wa-split-panel div[slot="end"] {
+    overflow-y: auto;
+}

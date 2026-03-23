@@ -4,6 +4,7 @@ export const DATASTAR_SIGNAL_PATCH_EVENT = "datastar-signal-patch";
 
 // Message types
 export const PORT_INIT = "init";
+export const SHOW_EVENT = "show-event";
 
 // SSE commands
 export const DATASTAR_PATCH_ELEMENTS = "datastar-patch-elements";

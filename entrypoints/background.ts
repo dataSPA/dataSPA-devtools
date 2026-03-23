@@ -1,4 +1,6 @@
 import type { PublicPath } from "wxt/browser";
+import type { Hole } from "uhtml";
+
 import {
   COPY_TO_CLIPBOARD,
   DATASPA_DEVTOOLS,
@@ -44,6 +46,7 @@ function isDevtoolsPortMessage(msg: unknown): msg is DevtoolsPortMessage {
   if (typeof msg.action !== "string") return false;
 
   if (msg.action === PORT_INIT) return true;
+  if (msg.action === SHOW_EVENT) return true;
   if (msg.action === COPY_TO_CLIPBOARD) return typeof msg.data === "string";
 
   return FORWARDED_TAB_ACTIONS.has(msg.action);
@@ -57,22 +60,78 @@ function isClipboardResponse(value: unknown): value is ClipboardResponse {
   return isRecord(value) && typeof value.ok === "boolean";
 }
 
+// Render the detail pane content for a selected SSE event
+function renderEventDetail(event: SSEEvent | undefined): Hole {
+  if (!event) {
+    return html`<p><em>Select an event to see its details.</em></p>`;
+  }
+  return html`
+    <dl>
+      <dt>Type</dt>
+      <dd>${event.type}</dd>
+      <dt>Element</dt>
+      <dd>${event.el ?? ""}</dd>
+      <dt>Selector</dt>
+      <dd>${event.argsRaw?.selector ?? ""}</dd>
+      <dt>Mode</dt>
+      <dd>${event.argsRaw?.mode ?? ""}</dd>
+    </dl>
+    ${event.argsRaw?.elements
+      ? html`<pre>${event.argsRaw.elements}</pre>`
+      : html``}
+  `;
+}
+
 // Render the full list of SSE events as <tr> rows inside a single <tbody>
-function renderSseRows(events: SSEEvent[]): string {
+function renderContent(events: SSEEvent[], selectedEvent?: SSEEvent): Hole {
+  return html`
+    <div id="content">
+      <wa-split-panel
+        orientation="vertical"
+        data-on:wa-reposition="$dividerPosition = evt.target.position"
+        data-attr:position="$dividerPosition"
+      >
+        <div slot="start">${renderSseRows(events)}</div>
+        <div slot="end">${renderEventDetail(selectedEvent)}</div>
+      </wa-split-panel>
+    </div>
+  `;
+}
+// Render the full list of SSE events as <tr> rows inside a single <tbody>
+function renderSseRows(events: SSEEvent[]): Hole {
   if (events.length === 0) {
-    return renderToString(
-      html`<tbody id="events-tbody">
+    return html`<table>
+      <thead>
         <tr>
+          <th>Element</th>
+          <th>Type</th>
+          <th>Selector</th>
+          <th>Mode</th>
+        </tr>
+      </thead>
+      <tbody id="events-tbody">
+        <tr data-on:click="console.log(evt)">
           <td colspan="4"><em>No events captured yet.</em></td>
         </tr>
-      </tbody>`,
-    );
+      </tbody>
+    </table>`;
   }
-  return renderToString(
-    html`<tbody id="events-tbody">
+  return html`<table>
+    <thead>
+      <tr>
+        <th>Element</th>
+        <th>Type</th>
+        <th>Selector</th>
+        <th>Mode</th>
+      </tr>
+    </thead>
+    <tbody id="events-tbody">
       ${events.map(
-        (event, i) => html`
-          <tr id="${`event-row-${i}`}">
+        (event) => html`
+          <tr
+            id="${`event-row-${event.id}`}"
+            data-on:click="#showEvent('${event.id}')"
+          >
             <td>${event.el ?? ""}</td>
             <td>${event.type}</td>
             <td>${event.argsRaw?.selector ?? ""}</td>
@@ -80,8 +139,8 @@ function renderSseRows(events: SSEEvent[]): string {
           </tr>
         `,
       )}
-    </tbody>`,
-  );
+    </tbody>
+  </table>`;
 }
 
 // Render a signal patch as a JSON <pre> block
@@ -114,6 +173,10 @@ export default defineBackground(() => {
 
   // One ring buffer per tab, persists until tab is closed / removed
   const sseBuffers = new Map<number, RingBuffer<SSEEvent>>();
+  // Monotonic counter per tab for assigning stable event IDs
+  const sseCounters = new Map<number, number>();
+  // Currently selected event per tab (shown in the detail pane)
+  const sseSplitOpen = new Map<number, SSEEvent>();
 
   let creating: Promise<void> | null = null;
 
@@ -182,6 +245,8 @@ export default defineBackground(() => {
   // Clean up SSE buffer when a tab is closed
   browser.tabs.onRemoved.addListener((tabId) => {
     sseBuffers.delete(tabId);
+    sseCounters.delete(tabId);
+    sseSplitOpen.delete(tabId);
   });
 
   browser.runtime.onConnect.addListener((port) => {
@@ -204,11 +269,23 @@ export default defineBackground(() => {
         if (buffer && !buffer.isEmpty()) {
           const patchMsg: PanelMessage = {
             type: "patch-elements",
-            selector: "#events-tbody",
+            selector: "",
             mode: "replace",
-            elements: renderSseRows(buffer.toArray()),
+            elements: renderToString(renderContent(buffer.toArray())),
           };
           port.postMessage(patchMsg);
+        }
+        return;
+      }
+
+      if (action === SHOW_EVENT) {
+        if (typeof data !== "string") return;
+        const event = sseBuffers
+          .get(tabId)
+          ?.toArray()
+          .find((e) => e.id === data);
+        if (event) {
+          port.postMessage({ type: "show-event", event });
         }
         return;
       }
@@ -263,7 +340,11 @@ export default defineBackground(() => {
         return;
       }
 
+      const nextId = (sseCounters.get(tabId) ?? 0) + 1;
+      sseCounters.set(tabId, nextId);
+
       const sseEvent: SSEEvent = {
+        id: String(nextId),
         type: eventData.type,
         el: typeof payload.el === "string" ? payload.el : undefined,
         argsRaw: isRecord(eventData.argsRaw)
@@ -291,9 +372,11 @@ export default defineBackground(() => {
 
       broadcastToTab(tabId, {
         type: "patch-elements",
-        selector: "#events-tbody",
+        selector: "",
         mode: "replace",
-        elements: renderSseRows(sseBuffers.get(tabId)!.toArray()),
+        elements: renderToString(
+          renderContent(sseBuffers.get(tabId)!.toArray()),
+        ),
       });
       // } else if (type === DATASTAR_SIGNAL_PATCH_EVENT) {
       //   const patch = parseJson(payload.data);

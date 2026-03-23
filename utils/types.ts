@@ -1,4 +1,5 @@
 type SSEEvent = {
+  id: string;
   type: string;
   argsRaw?: {
     selector?: string;

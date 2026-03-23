@@ -19,6 +19,7 @@
     "wxt": "^0.20.19"
   },
   "dependencies": {
+    "@awesome.me/webawesome": "^3.3.1",
     "uhtml": "^4.5.11"
   }
 }
