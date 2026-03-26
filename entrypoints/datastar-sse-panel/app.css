@@ -18,7 +18,146 @@ wa-split-panel {
     --max: calc(100% - 80px);
 }
 
-wa-split-panel div[slot='start'],
-wa-split-panel div[slot='end'] {
+wa-split-panel div[slot="start"],
+wa-split-panel div[slot="end"] {
     overflow-y: auto;
+}
+wa-split-panel div[slot="end"] > div {
+    padding: 10px;
+    justify-content: space-between;
+    display: flex;
+    gap: 10px;
+}
+
+/* ── HTML element tree ─────────────────────────────────────────────────────── */
+
+.ht-tree {
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 6px 8px;
+    color: var(--wa-color-neutral-950, #1a1a1a);
+}
+
+/* Each node is indented by padding on its children container */
+.ht-children {
+    padding-left: 16px;
+}
+
+.ht-line {
+    display: flex;
+    align-items: baseline;
+    white-space: pre;
+}
+
+/* Toggle button ▶ / ▼ */
+.ht-toggle {
+    all: unset;
+    display: inline-block;
+    width: 14px;
+    flex-shrink: 0;
+    cursor: pointer;
+    font-size: 9px;
+    color: var(--wa-color-neutral-600, #666);
+    user-select: none;
+    text-align: center;
+}
+
+.ht-toggle:hover {
+    color: var(--wa-color-neutral-950, #1a1a1a);
+}
+
+/* Spacer occupies the same width as the toggle button for leaf nodes */
+.ht-toggle-spacer {
+    display: inline-block;
+    width: 14px;
+    flex-shrink: 0;
+}
+
+/* Tag punctuation  < > </ > */
+.ht-punct {
+    color: var(--wa-color-neutral-600, #555);
+}
+
+/* Tag name  div  span  p */
+.ht-tag-name {
+    color: var(--wa-color-primary-600, #881280);
+}
+
+/* Attribute name  id  class  href */
+.ht-attr-name {
+    color: var(--wa-color-warning-700, #994500);
+}
+
+/* Attribute = sign */
+.ht-attr-eq {
+    color: var(--wa-color-neutral-600, #555);
+}
+
+/* Attribute value  "foo" */
+.ht-attr-value {
+    color: var(--wa-color-success-700, #1a6a2a);
+}
+
+/* Text node content */
+.ht-text-content {
+    color: var(--wa-color-neutral-950, #1a1a1a);
+}
+
+/* Comment node  <!-- ... --> */
+.ht-comment-content {
+    color: var(--wa-color-neutral-500, #888);
+    font-style: italic;
+}
+
+/* Empty placeholder */
+.ht-empty {
+    color: var(--wa-color-neutral-500, #888);
+    font-style: italic;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: monospace;
+}
+
+/* Dark-mode overrides (Chrome DevTools uses prefers-color-scheme) */
+@media (prefers-color-scheme: dark) {
+    .ht-tree {
+        color: var(--wa-color-neutral-50, #e8e8e8);
+    }
+
+    .ht-punct {
+        color: var(--wa-color-neutral-400, #aaa);
+    }
+
+    .ht-tag-name {
+        color: #e8a0bf;
+    }
+
+    .ht-attr-name {
+        color: #9db8ff;
+    }
+
+    .ht-attr-eq {
+        color: var(--wa-color-neutral-400, #aaa);
+    }
+
+    .ht-attr-value {
+        color: #8fcb8f;
+    }
+
+    .ht-text-content {
+        color: var(--wa-color-neutral-50, #e8e8e8);
+    }
+
+    .ht-comment-content {
+        color: var(--wa-color-neutral-400, #aaa);
+    }
+
+    .ht-toggle {
+        color: var(--wa-color-neutral-400, #aaa);
+    }
+
+    .ht-toggle:hover {
+        color: var(--wa-color-neutral-50, #e8e8e8);
+    }
 }

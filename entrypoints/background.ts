@@ -11,11 +11,17 @@ import {
   PORT_INIT,
   REMOVE_HIGHLIGHTS,
   SEND_TO_CONSOLE,
+  SHOW_ELEMENTS,
   SHOW_EVENT,
 } from "~/utils/constants";
 import { isBridgeEventMessage, isRecord, parseJson } from "~/utils/guards";
 import { html, type SafeHtml } from "~/utils/html";
-import { type PanelMessage, RingBuffer, type SSEEvent } from "~/utils/types";
+import {
+  type PanelElementsMessage,
+  type PanelMessage,
+  RingBuffer,
+  type SSEEvent,
+} from "~/utils/types";
 
 type DevtoolsPortMessage = {
   tabId: number;
@@ -66,18 +72,9 @@ function renderEventDetail(event: SSEEvent | undefined): SafeHtml {
     return html``;
   }
   return html`
-    <dl>
-      <dt>Type</dt>
-      <dd>${event.type}</dd>
-      <dt>Element</dt>
-      <dd>${event.el ?? ""}</dd>
-      <dt>Selector</dt>
-      <dd>${event.argsRaw?.selector ?? ""}</dd>
-      <dt>Mode</dt>
-      <dd>${event.argsRaw?.mode ?? ""}</dd>
-    </dl>
+    <div><button>Highlight selector</button><button>Close</button></div>
     ${event.argsRaw?.elements
-      ? html`<pre>${event.argsRaw.elements}</pre>`
+      ? html`<div id="elements-tree" class="ht-tree"></div>`
       : html``}
   `;
 }
@@ -271,15 +268,21 @@ export default defineBackground(() => {
         // Send current SSE history to the newly connected panel
         const buffer = sseBuffers.get(tabId);
         if (buffer && !buffer.isEmpty()) {
+          const selectedEvent = sseSplitOpen.get(tabId);
           const patchMsg: PanelMessage = {
             type: "patch-elements",
             selector: "",
             mode: "replace",
-            elements: String(
-              renderContent(buffer.toArray(), sseSplitOpen.get(tabId)),
-            ),
+            elements: String(renderContent(buffer.toArray(), selectedEvent)),
           };
           port.postMessage(patchMsg);
+          // Replay the elements tree for the selected event
+          if (selectedEvent?.argsRaw?.elements != null) {
+            port.postMessage({
+              type: SHOW_ELEMENTS,
+              elements: selectedEvent.argsRaw.elements,
+            } satisfies PanelElementsMessage);
+          }
         }
         return;
       }
@@ -298,6 +301,11 @@ export default defineBackground(() => {
           mode: "replace",
           elements: String(renderContent(events, selectedEvent)),
         } satisfies PanelMessage);
+        // Send the raw HTML string so the panel can build the element tree
+        port.postMessage({
+          type: SHOW_ELEMENTS,
+          elements: selectedEvent?.argsRaw?.elements ?? null,
+        } satisfies PanelElementsMessage);
         return;
       }
 
