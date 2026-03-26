@@ -1,5 +1,4 @@
 import type { PublicPath } from "wxt/browser";
-import type { Hole } from "uhtml";
 
 import {
   COPY_TO_CLIPBOARD,
@@ -14,7 +13,7 @@ import {
   SEND_TO_CONSOLE,
 } from "~/utils/constants";
 import { isRecord, isBridgeEventMessage, parseJson } from "~/utils/guards";
-import { html, renderToString } from "~/utils/uhtml-worker";
+import { html, type SafeHtml } from "~/utils/html";
 import { type SSEEvent, type PanelMessage, RingBuffer } from "~/utils/types";
 
 type DevtoolsPortMessage = {
@@ -61,7 +60,7 @@ function isClipboardResponse(value: unknown): value is ClipboardResponse {
 }
 
 // Render the detail pane content for a selected SSE event
-function renderEventDetail(event: SSEEvent | undefined): Hole {
+function renderEventDetail(event: SSEEvent | undefined): SafeHtml {
   if (!event) {
     return html`<p><em>Select an event to see its details.</em></p>`;
   }
@@ -83,7 +82,7 @@ function renderEventDetail(event: SSEEvent | undefined): Hole {
 }
 
 // Render the full list of SSE events as <tr> rows inside a single <tbody>
-function renderContent(events: SSEEvent[], selectedEvent?: SSEEvent): Hole {
+function renderContent(events: SSEEvent[], selectedEvent?: SSEEvent): SafeHtml {
   return html`
     <div id="content">
       <wa-split-panel
@@ -98,7 +97,7 @@ function renderContent(events: SSEEvent[], selectedEvent?: SSEEvent): Hole {
   `;
 }
 // Render the full list of SSE events as <tr> rows inside a single <tbody>
-function renderSseRows(events: SSEEvent[]): Hole {
+function renderSseRows(events: SSEEvent[]): SafeHtml {
   if (events.length === 0) {
     return html`<table>
       <thead>
@@ -116,7 +115,9 @@ function renderSseRows(events: SSEEvent[]): Hole {
       </tbody>
     </table>`;
   }
-  return html`<table>
+  return html`<table
+    data-on:click="#showEvent(evt.target.closest('tr').dataset.eventId)"
+  >
     <thead>
       <tr>
         <th>Element</th>
@@ -128,10 +129,7 @@ function renderSseRows(events: SSEEvent[]): Hole {
     <tbody id="events-tbody">
       ${events.map(
         (event) => html`
-          <tr
-            id="${`event-row-${event.id}`}"
-            data-on:click="#showEvent('${event.id}')"
-          >
+          <tr id="${`event-row-${event.id}`}" data-event-id="${event.id}">
             <td>${event.el ?? ""}</td>
             <td>${event.type}</td>
             <td>${event.argsRaw?.selector ?? ""}</td>
@@ -145,14 +143,14 @@ function renderSseRows(events: SSEEvent[]): Hole {
 
 // Render a signal patch as a JSON <pre> block
 function renderSignalPatch(patch: unknown): string {
-  return renderToString(
+  return String(
     html`<pre id="signal-patch">${JSON.stringify(patch, null, 2)}</pre>`,
   );
 }
 
 // Render a signal root snapshot as a JSON <pre> block
 function renderSignalRoot(root: unknown): string {
-  return renderToString(
+  return String(
     html`<pre id="signal-root">${JSON.stringify(root, null, 2)}</pre>`,
   );
 }
@@ -271,7 +269,7 @@ export default defineBackground(() => {
             type: "patch-elements",
             selector: "",
             mode: "replace",
-            elements: renderToString(renderContent(buffer.toArray())),
+            elements: String(renderContent(buffer.toArray())),
           };
           port.postMessage(patchMsg);
         }
@@ -374,9 +372,7 @@ export default defineBackground(() => {
         type: "patch-elements",
         selector: "",
         mode: "replace",
-        elements: renderToString(
-          renderContent(sseBuffers.get(tabId)!.toArray()),
-        ),
+        elements: String(renderContent(sseBuffers.get(tabId)!.toArray())),
       });
       // } else if (type === DATASTAR_SIGNAL_PATCH_EVENT) {
       //   const patch = parseJson(payload.data);

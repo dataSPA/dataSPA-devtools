@@ -9,7 +9,7 @@ export default defineConfig({
     web_accessible_resources: [
       {
         matches: ["*://*/*"],
-        resources: ["injected.js", "datastar-csp.js"],
+        resources: ["injected.js"],
       },
     ],
     content_security_policy: {
