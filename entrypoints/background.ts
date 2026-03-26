@@ -11,10 +11,11 @@ import {
   PORT_INIT,
   REMOVE_HIGHLIGHTS,
   SEND_TO_CONSOLE,
+  SHOW_EVENT,
 } from "~/utils/constants";
-import { isRecord, isBridgeEventMessage, parseJson } from "~/utils/guards";
+import { isBridgeEventMessage, isRecord, parseJson } from "~/utils/guards";
 import { html, type SafeHtml } from "~/utils/html";
-import { type SSEEvent, type PanelMessage, RingBuffer } from "~/utils/types";
+import { type PanelMessage, RingBuffer, type SSEEvent } from "~/utils/types";
 
 type DevtoolsPortMessage = {
   tabId: number;
@@ -62,7 +63,7 @@ function isClipboardResponse(value: unknown): value is ClipboardResponse {
 // Render the detail pane content for a selected SSE event
 function renderEventDetail(event: SSEEvent | undefined): SafeHtml {
   if (!event) {
-    return html`<p><em>Select an event to see its details.</em></p>`;
+    return html``;
   }
   return html`
     <dl>
@@ -85,6 +86,11 @@ function renderEventDetail(event: SSEEvent | undefined): SafeHtml {
 function renderContent(events: SSEEvent[], selectedEvent?: SSEEvent): SafeHtml {
   return html`
     <div id="content">
+      <pre
+        id="json-signals"
+        data-json-signals
+        data-signals__ifmissing="{dividerPosition: 50}"
+      ></pre>
       <wa-split-panel
         orientation="vertical"
         data-on:wa-reposition="$dividerPosition = evt.target.position"
@@ -269,7 +275,9 @@ export default defineBackground(() => {
             type: "patch-elements",
             selector: "",
             mode: "replace",
-            elements: String(renderContent(buffer.toArray())),
+            elements: String(
+              renderContent(buffer.toArray(), sseSplitOpen.get(tabId)),
+            ),
           };
           port.postMessage(patchMsg);
         }
@@ -278,13 +286,18 @@ export default defineBackground(() => {
 
       if (action === SHOW_EVENT) {
         if (typeof data !== "string") return;
-        const event = sseBuffers
-          .get(tabId)
-          ?.toArray()
-          .find((e) => e.id === data);
-        if (event) {
-          port.postMessage({ type: "show-event", event });
+        const buffer = sseBuffers.get(tabId);
+        const events = buffer?.toArray() ?? [];
+        const selectedEvent = events.find((e) => e.id === data);
+        if (selectedEvent) {
+          sseSplitOpen.set(tabId, selectedEvent);
         }
+        port.postMessage({
+          type: "patch-elements",
+          selector: "",
+          mode: "replace",
+          elements: String(renderContent(events, selectedEvent)),
+        } satisfies PanelMessage);
         return;
       }
 
@@ -372,7 +385,12 @@ export default defineBackground(() => {
         type: "patch-elements",
         selector: "",
         mode: "replace",
-        elements: String(renderContent(sseBuffers.get(tabId)!.toArray())),
+        elements: String(
+          renderContent(
+            sseBuffers.get(tabId)!.toArray(),
+            sseSplitOpen.get(tabId),
+          ),
+        ),
       });
       // } else if (type === DATASTAR_SIGNAL_PATCH_EVENT) {
       //   const patch = parseJson(payload.data);

@@ -1,8 +1,24 @@
-wa-split-panel {
-    height: 400px;
+html,
+body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
 }
 
-wa-split-panel div[slot="start"],
-wa-split-panel div[slot="end"] {
+#content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+wa-split-panel {
+    flex: 1;
+    min-height: 0;
+    --min: 80px;
+    --max: calc(100% - 80px);
+}
+
+wa-split-panel div[slot='start'],
+wa-split-panel div[slot='end'] {
     overflow-y: auto;
 }
