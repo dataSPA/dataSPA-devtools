@@ -1,7 +1,24 @@
-import { COPY_TO_CLIPBOARD } from "~/utils/constants";
+/**
+ * Offscreen document — handles tasks that require a real DOM but cannot run
+ * in the MV3 service worker.
+ *
+ * Supported actions (routed via `message.target === 'offscreen'`):
+ *   - `copy-to-clipboard`  — writes text to the clipboard (CLIPBOARD reason)
+ *   - `render-html-tree`   — parses an HTML string and returns a serialised
+ *                            ht-* collapsible tree (DOM_PARSER reason)
+ */
+
+import { COPY_TO_CLIPBOARD, RENDER_HTML_TREE } from "~/utils/constants";
+import { buildHtmlTree } from "~/utils/html-tree";
 
 type ClipboardResponse = {
   ok: boolean;
+  error?: string;
+};
+
+type HtmlTreeResponse = {
+  ok: boolean;
+  html?: string;
   error?: string;
 };
 
@@ -44,16 +61,39 @@ async function copyText(text: string): Promise<ClipboardResponse> {
   }
 }
 
-browser.runtime.onMessage.addListener((message: unknown) => {
+function renderHtmlTree(elements: string): HtmlTreeResponse {
+  try {
+    const html = buildHtmlTree(elements);
+    return { ok: true, html };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "HTML tree render failed",
+    };
+  }
+}
+
+browser.runtime.onMessage.addListener((message: unknown, _, sendResponse) => {
   if (!isRecord(message)) return;
   if (message.target !== "offscreen") return;
-  if (message.action !== COPY_TO_CLIPBOARD) return;
-  if (typeof message.text !== "string") {
-    return Promise.resolve({
-      ok: false,
-      error: "Invalid clipboard payload",
-    } satisfies ClipboardResponse);
+
+  if (message.action === COPY_TO_CLIPBOARD) {
+    if (typeof message.text !== "string") {
+      return Promise.resolve({
+        ok: false,
+        error: "Invalid clipboard payload",
+      } satisfies ClipboardResponse);
+    }
+    return sendResponse(copyText(message.text));
   }
 
-  return copyText(message.text);
+  if (message.action === RENDER_HTML_TREE) {
+    if (typeof message.elements !== "string") {
+      return Promise.resolve({
+        ok: false,
+        error: "Invalid html-tree payload",
+      } satisfies HtmlTreeResponse);
+    }
+    sendResponse(renderHtmlTree(message.elements));
+  }
 });

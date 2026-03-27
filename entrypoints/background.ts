@@ -4,24 +4,23 @@ import {
   COPY_TO_CLIPBOARD,
   DATASPA_DEVTOOLS,
   DATASTAR_FETCH_EVENT,
-  DATASTAR_SIGNAL_PATCH_EVENT,
   GET_SIGNAL_ROOT,
   GET_SIGNAL_ROOT_REPLY,
   HIGHLIGHT_SELECTORS,
   PORT_INIT,
   REMOVE_HIGHLIGHTS,
+  RENDER_HTML_TREE,
   SEND_TO_CONSOLE,
-  SHOW_ELEMENTS,
   SHOW_EVENT,
 } from "~/utils/constants";
-import { isBridgeEventMessage, isRecord, parseJson } from "~/utils/guards";
-import { html, type SafeHtml } from "~/utils/html";
 import {
-  type PanelElementsMessage,
-  type PanelMessage,
-  RingBuffer,
-  type SSEEvent,
-} from "~/utils/types";
+  isBridgeEventMessage,
+  isHtmlTreeResponse,
+  isRecord,
+  parseJson,
+} from "~/utils/guards";
+import { html, type SafeHtml } from "~/utils/html";
+import { type PanelMessage, RingBuffer, type SSEEvent } from "~/utils/types";
 
 type DevtoolsPortMessage = {
   tabId: number;
@@ -66,21 +65,30 @@ function isClipboardResponse(value: unknown): value is ClipboardResponse {
   return isRecord(value) && typeof value.ok === "boolean";
 }
 
-// Render the detail pane content for a selected SSE event
-function renderEventDetail(event: SSEEvent | undefined): SafeHtml {
+// Render the detail pane content for a selected SSE event.
+// `treeHtml` is a pre-rendered ht-* HTML string produced by the offscreen doc,
+// or null when no elements payload exists for the selected event.
+function renderEventDetail(
+  event: SSEEvent | undefined,
+  treeHtml: string | null,
+): SafeHtml {
   if (!event) {
     return html``;
   }
   return html`
     <div><button>Highlight selector</button><button>Close</button></div>
-    ${event.argsRaw?.elements
-      ? html`<div id="elements-tree" class="ht-tree"></div>`
+    ${treeHtml != null
+      ? html`<div id="elements-tree" class="ht-tree">${treeHtml}</div>`
       : html``}
   `;
 }
 
-// Render the full list of SSE events as <tr> rows inside a single <tbody>
-function renderContent(events: SSEEvent[], selectedEvent?: SSEEvent): SafeHtml {
+// Render the full panel shell containing the event table and detail pane.
+function renderContent(
+  events: SSEEvent[],
+  selectedEvent?: SSEEvent,
+  treeHtml?: string | null,
+): SafeHtml {
   return html`
     <div id="content">
       <pre
@@ -94,11 +102,14 @@ function renderContent(events: SSEEvent[], selectedEvent?: SSEEvent): SafeHtml {
         data-attr:position="$dividerPosition"
       >
         <div slot="start">${renderSseRows(events)}</div>
-        <div slot="end">${renderEventDetail(selectedEvent)}</div>
+        <div slot="end">
+          ${renderEventDetail(selectedEvent, treeHtml ?? null)}
+        </div>
       </wa-split-panel>
     </div>
   `;
 }
+
 // Render the full list of SSE events as <tr> rows inside a single <tbody>
 function renderSseRows(events: SSEEvent[]): SafeHtml {
   if (events.length === 0) {
@@ -144,8 +155,8 @@ function renderSseRows(events: SSEEvent[]): SafeHtml {
   </table>`;
 }
 
-// Render a signal patch as a JSON <pre> block
-function renderSignalPatch(patch: unknown): string {
+// Render a signal patch as a JSON <pre> block (unused while signal broadcast is commented out)
+function _renderSignalPatch(patch: unknown): string {
   return String(
     html`<pre id="signal-patch">${JSON.stringify(patch, null, 2)}</pre>`,
   );
@@ -178,6 +189,8 @@ export default defineBackground(() => {
   const sseCounters = new Map<number, number>();
   // Currently selected event per tab (shown in the detail pane)
   const sseSplitOpen = new Map<number, SSEEvent>();
+  // Cached ht-* tree HTML for the currently selected event per tab
+  const sseSplitOpenTreeHtml = new Map<number, string | null>();
 
   let creating: Promise<void> | null = null;
 
@@ -205,8 +218,9 @@ export default defineBackground(() => {
       creating = (async () => {
         await browser.offscreen.createDocument({
           url: path,
-          reasons: ["CLIPBOARD"],
-          justification: "Copy extension-inspected payloads to clipboard",
+          reasons: ["CLIPBOARD", "DOM_PARSER"],
+          justification:
+            "Copy extension-inspected payloads to clipboard; parse HTML payloads into element trees",
         });
       })();
       try {
@@ -234,6 +248,33 @@ export default defineBackground(() => {
     }
   }
 
+  /**
+   * Ask the offscreen document to parse `elements` (raw HTML) and return a
+   * serialised ht-* tree HTML string. Returns null on failure.
+   */
+  async function renderHtmlTree(elements: string): Promise<string | null> {
+    try {
+      await ensureOffscreenDocument("/offscreen.html" as PublicPath);
+      const response = await browser.runtime.sendMessage({
+        action: RENDER_HTML_TREE,
+        target: "offscreen",
+        elements,
+      });
+      if (!isHtmlTreeResponse(response) || !response.ok) {
+        const error =
+          isHtmlTreeResponse(response) && response.error
+            ? response.error
+            : "Unknown offscreen html-tree error";
+        console.error("HTML tree render failed", error);
+        return null;
+      }
+      return response.html ?? null;
+    } catch (error) {
+      console.error("HTML tree render failed", error);
+      return null;
+    }
+  }
+
   function broadcastToTab(tabId: number, message: PanelMessage) {
     const allPorts = ports.get(tabId);
     if (allPorts) {
@@ -248,6 +289,7 @@ export default defineBackground(() => {
     sseBuffers.delete(tabId);
     sseCounters.delete(tabId);
     sseSplitOpen.delete(tabId);
+    sseSplitOpenTreeHtml.delete(tabId);
   });
 
   browser.runtime.onConnect.addListener((port) => {
@@ -269,20 +311,16 @@ export default defineBackground(() => {
         const buffer = sseBuffers.get(tabId);
         if (buffer && !buffer.isEmpty()) {
           const selectedEvent = sseSplitOpen.get(tabId);
-          const patchMsg: PanelMessage = {
+          // Use the cached tree HTML — no extra offscreen round-trip needed
+          const treeHtml = sseSplitOpenTreeHtml.get(tabId) ?? null;
+          port.postMessage({
             type: "patch-elements",
             selector: "",
-            mode: "replace",
-            elements: String(renderContent(buffer.toArray(), selectedEvent)),
-          };
-          port.postMessage(patchMsg);
-          // Replay the elements tree for the selected event
-          if (selectedEvent?.argsRaw?.elements != null) {
-            port.postMessage({
-              type: SHOW_ELEMENTS,
-              elements: selectedEvent.argsRaw.elements,
-            } satisfies PanelElementsMessage);
-          }
+            mode: "outer",
+            elements: String(
+              renderContent(buffer.toArray(), selectedEvent, treeHtml),
+            ),
+          } satisfies PanelMessage);
         }
         return;
       }
@@ -295,17 +333,18 @@ export default defineBackground(() => {
         if (selectedEvent) {
           sseSplitOpen.set(tabId, selectedEvent);
         }
+
+        // Render the HTML tree in the offscreen doc (if the event has elements)
+        const rawElements = selectedEvent?.argsRaw?.elements;
+        const treeHtml = rawElements ? await renderHtmlTree(rawElements) : null;
+        sseSplitOpenTreeHtml.set(tabId, treeHtml);
+
         port.postMessage({
           type: "patch-elements",
           selector: "",
-          mode: "replace",
-          elements: String(renderContent(events, selectedEvent)),
+          mode: "outer",
+          elements: String(renderContent(events, selectedEvent, treeHtml)),
         } satisfies PanelMessage);
-        // Send the raw HTML string so the panel can build the element tree
-        port.postMessage({
-          type: SHOW_ELEMENTS,
-          elements: selectedEvent?.argsRaw?.elements ?? null,
-        } satisfies PanelElementsMessage);
         return;
       }
 
@@ -389,31 +428,33 @@ export default defineBackground(() => {
       }
       sseBuffers.get(tabId)!.push(sseEvent);
 
+      // No event is newly selected on ingest — broadcast without a tree
       broadcastToTab(tabId, {
         type: "patch-elements",
         selector: "",
-        mode: "replace",
+        mode: "outer",
         elements: String(
           renderContent(
             sseBuffers.get(tabId)!.toArray(),
             sseSplitOpen.get(tabId),
+            sseSplitOpenTreeHtml.get(tabId),
           ),
         ),
       });
       // } else if (type === DATASTAR_SIGNAL_PATCH_EVENT) {
-      //   const patch = parseJson(payload.data);
+      //   const patch = parseJson(payload.data)
       //   broadcastToTab(tabId, {
-      //     type: "patch-elements",
-      //     selector: "#signal-patch-container",
-      //     mode: "replace",
-      //     elements: renderSignalPatch(patch),
-      //   });
+      //     type: 'patch-elements',
+      //     selector: '#signal-patch-container',
+      //     mode: 'outer',
+      //     elements: _renderSignalPatch(patch),
+      //   })
     } else if (type === GET_SIGNAL_ROOT_REPLY) {
       const root = parseJson(payload.data);
       broadcastToTab(tabId, {
         type: "patch-elements",
         selector: "#signal-root-container",
-        mode: "replace",
+        mode: "outer",
         elements: renderSignalRoot(root),
       });
     }

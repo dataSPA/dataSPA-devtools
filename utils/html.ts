@@ -41,10 +41,7 @@ function interpolate(value: unknown): string {
  * yields the full HTML string. This means nested `html` results are inserted
  * verbatim while plain string/number interpolations are escaped.
  */
-function html(
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-): SafeHtml {
+function html(strings: TemplateStringsArray, ...values: unknown[]): SafeHtml {
   let result = ''
   for (let i = 0; i < strings.length; i++) {
     result += strings[i]

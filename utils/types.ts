@@ -123,17 +123,15 @@ type PanelSignalMessage = {
   signals: string
 }
 
-/** Sent from background → panel to render the raw HTML element tree in the detail pane. */
-type PanelElementsMessage = {
-  type: 'show-elements'
-  /** The raw HTML string from `SSEEvent.argsRaw.elements`, or null to clear. */
-  elements: string | null
+/** Response from the offscreen document after rendering an HTML tree. */
+type HtmlTreeResponse = {
+  ok: boolean
+  /** Serialised ht-* tree HTML, present when ok is true. */
+  html?: string
+  error?: string
 }
 
-type PanelMessage =
-  | PanelPatchMessage
-  | PanelSignalMessage
-  | PanelElementsMessage
+type PanelMessage = PanelPatchMessage | PanelSignalMessage
 
 export {
   type SSEEvent,
@@ -141,8 +139,8 @@ export {
   type DSFetchDetail,
   RingBuffer,
   type BridgeEventMessage,
+  type HtmlTreeResponse,
   type PanelPatchMessage,
   type PanelSignalMessage,
-  type PanelElementsMessage,
   type PanelMessage,
 }
