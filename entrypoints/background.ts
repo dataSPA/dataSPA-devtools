@@ -6,6 +6,7 @@ import {
   DATASTAR_FETCH_EVENT,
   GET_SIGNAL_ROOT,
   GET_SIGNAL_ROOT_REPLY,
+  HIDE_EVENT,
   HIGHLIGHT_SELECTORS,
   PORT_INIT,
   REMOVE_HIGHLIGHTS,
@@ -52,6 +53,7 @@ function isDevtoolsPortMessage(msg: unknown): msg is DevtoolsPortMessage {
 
   if (msg.action === PORT_INIT) return true;
   if (msg.action === SHOW_EVENT) return true;
+  if (msg.action === HIDE_EVENT) return true;
   if (msg.action === COPY_TO_CLIPBOARD) return typeof msg.data === "string";
 
   return FORWARDED_TAB_ACTIONS.has(msg.action);
@@ -76,7 +78,10 @@ function renderEventDetail(
     return html``;
   }
   return html`
-    <div><button>Highlight selector</button><button>Close</button></div>
+    <div>
+      <button>Highlight selector</button
+      ><button data-on:click="#hideEvent()">Close</button>
+    </div>
     ${treeHtml != null
       ? html`<div id="elements-tree" class="ht-tree">${treeHtml}</div>`
       : html``}
@@ -96,16 +101,18 @@ function renderContent(
         data-json-signals
         data-signals__ifmissing="{dividerPosition: 50}"
       ></pre>
-      <wa-split-panel
-        orientation="vertical"
-        data-on:wa-reposition="$dividerPosition = evt.target.position"
-        data-attr:position="$dividerPosition"
-      >
-        <div slot="start">${renderSseRows(events)}</div>
-        <div slot="end">
-          ${renderEventDetail(selectedEvent, treeHtml ?? null)}
-        </div>
-      </wa-split-panel>
+      ${selectedEvent === undefined
+        ? html`<div id="events" slot="start">${renderSseRows(events)}</div>`
+        : html` <wa-split-panel
+            orientation="vertical"
+            data-on:wa-reposition="$dividerPosition = evt.target.position"
+            data-attr:position="$dividerPosition"
+          >
+            <div id="events" slot="start">${renderSseRows(events)}</div>
+            <div id="event-detail" slot="end">
+              ${renderEventDetail(selectedEvent, treeHtml ?? null)}
+            </div>
+          </wa-split-panel>`}
     </div>
   `;
 }
@@ -344,6 +351,19 @@ export default defineBackground(() => {
           selector: "",
           mode: "outer",
           elements: String(renderContent(events, selectedEvent, treeHtml)),
+        } satisfies PanelMessage);
+        return;
+      }
+      if (action === HIDE_EVENT) {
+        const buffer = sseBuffers.get(tabId);
+        const events = buffer?.toArray() ?? [];
+        sseSplitOpen.delete(tabId);
+
+        port.postMessage({
+          type: "patch-elements",
+          selector: "",
+          mode: "outer",
+          elements: String(renderContent(events)),
         } satisfies PanelMessage);
         return;
       }

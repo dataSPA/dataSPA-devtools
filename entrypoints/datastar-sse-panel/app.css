@@ -5,6 +5,13 @@ body {
     overflow: hidden;
 }
 
+#events {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+}
+
 #content {
     display: flex;
     flex-direction: column;

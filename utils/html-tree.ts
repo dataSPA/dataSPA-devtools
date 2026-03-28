@@ -67,12 +67,6 @@ function buildAttributeSpans(el: Element): DocumentFragment {
   return frag;
 }
 
-/**
- * Build a single DOM node's tree representation.
- *
- * @param node     The DOM node to represent
- * @param depth    Current nesting depth (0 = top-level; controls default open state)
- */
 function buildNode(node: Node, depth: number): HTMLElement | null {
   // --- Element node ---
   if (node.nodeType === Node.ELEMENT_NODE) {
