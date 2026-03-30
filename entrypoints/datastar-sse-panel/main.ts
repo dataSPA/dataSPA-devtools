@@ -24,3 +24,6 @@ registerHelper("showEvent", (id: string) => {
 registerHelper("hideEvent", () => {
   port.postMessage({ action: HIDE_EVENT, tabId });
 });
+registerHelper("highlightSelectors", () => {
+  port.postMessage({ action: HIGHLIGHT_SELECTORS, tabId });
+});

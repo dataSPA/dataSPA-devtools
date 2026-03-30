@@ -79,8 +79,8 @@ function renderEventDetail(
   }
   return html`
     <div>
-      <button>Highlight selector</button
-      ><button data-on:click="#hideEvent()">Close</button>
+      <button data-on:click="#highlightSelectors()">Highlight selector</button>
+      <button data-on:click="#hideEvent()">Close</button>
     </div>
     ${treeHtml != null
       ? html`<div id="elements-tree" class="ht-tree">${treeHtml}</div>`
@@ -96,11 +96,10 @@ function renderContent(
 ): SafeHtml {
   return html`
     <div id="content">
-      <pre
+      <aside
         id="json-signals"
-        data-json-signals
         data-signals__ifmissing="{dividerPosition: 50}"
-      ></pre>
+      ></aside>
       ${selectedEvent === undefined
         ? html`<div id="events" slot="start">${renderSseRows(events)}</div>`
         : html` <wa-split-panel
@@ -130,7 +129,7 @@ function renderSseRows(events: SSEEvent[]): SafeHtml {
         </tr>
       </thead>
       <tbody id="events-tbody">
-        <tr data-on:click="console.log(evt)">
+        <tr>
           <td colspan="4"><em>No events captured yet.</em></td>
         </tr>
       </tbody>
@@ -236,6 +235,16 @@ export default defineBackground(() => {
         creating = null;
       }
     }
+  }
+
+  async function highlightSelectors(event: SSEEvent): Promise<string[]> {
+    await ensureOffscreenDocument("/offscreen.html" as PublicPath);
+    const response = await browser.runtime.sendMessage({
+      action: HIGHLIGHT_SELECTORS,
+      target: "offscreen",
+      event,
+    });
+    return response;
   }
 
   async function copyToClipboard(text: string): Promise<void> {
@@ -354,6 +363,7 @@ export default defineBackground(() => {
         } satisfies PanelMessage);
         return;
       }
+
       if (action === HIDE_EVENT) {
         const buffer = sseBuffers.get(tabId);
         const events = buffer?.toArray() ?? [];
@@ -374,6 +384,24 @@ export default defineBackground(() => {
           await copyToClipboard(data);
         } catch (error) {
           console.error("Clipboard copy failed", error);
+        }
+        return;
+      }
+
+      if (action === HIGHLIGHT_SELECTORS) {
+        let selectors: string[] = [];
+        if (!sseBuffers.has(tabId)) return;
+        const selectedEvent = sseSplitOpen.get(tabId);
+        if (!selectedEvent) return;
+        try {
+          selectors = await highlightSelectors(selectedEvent);
+        } catch (error) {
+          console.error("Highlight selectors failed", error);
+        }
+        try {
+          await browser.tabs.sendMessage(tabId, { action, data: selectors });
+        } catch (error) {
+          console.error(`Failed to send tab message for tab ${tabId}`, error);
         }
         return;
       }
