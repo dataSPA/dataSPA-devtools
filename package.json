@@ -1,8 +1,8 @@
 {
-  "name": "dataSPAdevtools",
-  "description": "A devtools extension for dataSPA. May also work with datastar.",
+  "name": "datastar-devtools",
+  "description": "A devtools extension for datastar and dataSPA.",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",
