@@ -1,6 +1,7 @@
 import type { PublicPath } from "wxt/browser";
 
 import codeXml from "~/assets/codexml.svg";
+import radio from "~/assets/radio.svg";
 
 import {
   COPY_TO_CLIPBOARD,
@@ -81,24 +82,22 @@ function renderEventDetail(
   if (!event) {
     return html``;
   }
+  if (event.type === "datastar-patch-signals") {
+    const signals = JSON.parse(event.argsRaw?.signals ?? "{}");
+    return html`
+      <div>
+        <button data-on:click="#hideEvent()">Close</button>
+      </div>
+      <pre>${JSON.stringify(signals, null, 2)}</pre>
+    `;
+  }
+
   return html`
     <div>
       <button data-on:click="#highlightSelectors()">Highlight selector</button>
       <button data-on:click="#hideEvent()">Close</button>
     </div>
-    <pre>
-    ${treeHtml}
-  </pre
-    >
-  `;
-  return html`
-    <div>
-      <button data-on:click="#highlightSelectors()">Highlight selector</button>
-      <button data-on:click="#hideEvent()">Close</button>
-    </div>
-    ${treeHtml != null
-      ? html`<div id="elements-tree" class="ht-tree">${treeHtml}</div>`
-      : html``}
+    <pre>${treeHtml}</pre>
   `;
 }
 
@@ -225,19 +224,29 @@ export default defineBackground(() => {
 
     const rows = await Promise.all(
       events.map(async (event) => {
-        const selectors = await highlightSelectors(tabId, event);
-        const selectorsString = selectors.join(", ");
-        return html`
-          <tr id="${`event-row-${event.id}`}" data-event-id="${event.id}">
-            <td>
-              ${event.type !== "elements"
-                ? html`<img src="${codeXml}" />`
-                : event.type}
-            </td>
-            <td>${selectorsString}</td>
-            <td>${event.argsRaw?.elements ?? ""}</td>
-          </tr>
-        `;
+        if (event.type === "datastar-patch-elements") {
+          const selectors = await highlightSelectors(tabId, event);
+          const selectorsString = selectors.join(", ");
+          return html`
+            <tr id="${`event-row-${event.id}`}" data-event-id="${event.id}">
+              <td>
+                <img src="${codeXml}" />
+              </td>
+              <td>${selectorsString}</td>
+              <td>${event.argsRaw?.elements ?? ""}</td>
+            </tr>
+          `;
+        }
+        if (event.type === "datastar-patch-signals") {
+          return html`
+            <tr id="${`event-row-${event.id}`}" data-event-id="${event.id}">
+              <td>
+                <img src="${radio}" />
+              </td>
+              <td colspan="2">${event.argsRaw?.signals ?? ""}</td>
+            </tr>
+          `;
+        }
       }),
     );
 
@@ -499,20 +508,29 @@ export default defineBackground(() => {
         type: eventData.type,
         el: typeof payload.el === "string" ? payload.el : undefined,
         argsRaw: isRecord(eventData.argsRaw)
-          ? {
-              selector:
-                typeof eventData.argsRaw.selector === "string"
-                  ? eventData.argsRaw.selector
-                  : undefined,
-              elements:
-                typeof eventData.argsRaw.elements === "string"
-                  ? eventData.argsRaw.elements
-                  : undefined,
-              mode:
-                typeof eventData.argsRaw.mode === "string"
-                  ? eventData.argsRaw.mode
-                  : undefined,
-            }
+          ? eventData.type === "datastar-patch-elements"
+            ? {
+                selector:
+                  typeof eventData.argsRaw.selector === "string"
+                    ? eventData.argsRaw.selector
+                    : undefined,
+                elements:
+                  typeof eventData.argsRaw.elements === "string"
+                    ? eventData.argsRaw.elements
+                    : undefined,
+                mode:
+                  typeof eventData.argsRaw.mode === "string"
+                    ? eventData.argsRaw.mode
+                    : undefined,
+              }
+            : eventData.type === "datastar-patch-signals"
+              ? {
+                  signals:
+                    typeof eventData.argsRaw.signals === "string"
+                      ? eventData.argsRaw.signals
+                      : undefined,
+                }
+              : undefined
           : undefined,
       };
 
