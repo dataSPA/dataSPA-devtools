@@ -5,6 +5,31 @@ body {
     overflow: hidden;
 }
 
+table {
+    margin-inline: 5px;
+    table-layout: auto;
+    width: 100%;
+    font-size: 10px;
+}
+
+td {
+    padding-block: 0;
+    padding-inline: 2px;
+    white-space: nowrap;
+    vertical-align: middle;
+
+    img {
+        height: 12px;
+    }
+
+    &:last-child {
+        max-width: 0;
+        width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+}
+
 #events {
     display: flex;
     flex-direction: column;

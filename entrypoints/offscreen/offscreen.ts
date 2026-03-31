@@ -12,8 +12,8 @@
 import type { SSEEvent } from "@/utils/types";
 import {
   COPY_TO_CLIPBOARD,
-  HIGHLIGHT_SELECTORS,
   RENDER_HTML_TREE,
+  HIGHLIGHT_SELECTORS,
 } from "~/utils/constants";
 import { buildHtmlTree } from "~/utils/html-tree";
 
@@ -63,6 +63,7 @@ function fragmentFromElements(elements: string) {
   }
   return newContent;
 }
+
 function fragmentForEvent(event: SSEEvent) {
   if (!event.argsRaw || !event.argsRaw.elements) {
     return;
@@ -101,8 +102,6 @@ function getSelectors(event: SSEEvent) {
 
   return selectors;
 }
-
-export { getSelectors as getSelector };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -183,3 +182,5 @@ browser.runtime.onMessage.addListener((message: unknown, _, sendResponse) => {
     sendResponse(getSelectors(message.event as SSEEvent));
   }
 });
+
+export { getSelectors };

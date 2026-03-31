@@ -247,11 +247,25 @@ export function buildHtmlTree(htmlString: string): string {
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlString, "text/html");
-  const topNodes = Array.from(doc.body.childNodes);
+  const headNodes = Array.from(doc.head?.childNodes);
+  const bodyNodes = Array.from(doc.body?.childNodes);
 
-  let ret = "";
-  for (const node of topNodes) {
-    ret += prettyHTML(node, 0);
+  const container = document.createElement("div");
+  for (const node of headNodes) {
+    const el = buildNode(node, 0);
+    if (el) container.appendChild(el);
   }
-  return ret;
+  for (const node of bodyNodes) {
+    const el = buildNode(node, 0);
+    if (el) container.appendChild(el);
+  }
+  return container.innerHTML;
+  // let ret = "";
+  // for (const node of headNodes) {
+  //   ret += prettyHTML(node, 0);
+  // }
+  // for (const node of bodyNodes) {
+  //   ret += prettyHTML(node, 0);
+  // }
+  // return ret;
 }

@@ -1,5 +1,7 @@
 import type { PublicPath } from "wxt/browser";
 
+import codeXml from "~/assets/codexml.svg";
+
 import {
   COPY_TO_CLIPBOARD,
   DATASPA_DEVTOOLS,
@@ -20,8 +22,10 @@ import {
   isRecord,
   parseJson,
 } from "~/utils/guards";
-import { html, type SafeHtml } from "~/utils/html";
-import { type PanelMessage, RingBuffer, type SSEEvent } from "~/utils/types";
+import { html, SafeHtml } from "~/utils/html";
+import type { PanelMessage, SSEEvent } from "~/utils/types";
+
+type tabId = number;
 
 type DevtoolsPortMessage = {
   tabId: number;
@@ -72,7 +76,7 @@ function isClipboardResponse(value: unknown): value is ClipboardResponse {
 // or null when no elements payload exists for the selected event.
 function renderEventDetail(
   event: SSEEvent | undefined,
-  treeHtml: string | null,
+  treeHtml: SafeHtml | null,
 ): SafeHtml {
   if (!event) {
     return html``;
@@ -82,83 +86,20 @@ function renderEventDetail(
       <button data-on:click="#highlightSelectors()">Highlight selector</button>
       <button data-on:click="#hideEvent()">Close</button>
     </div>
+    <pre>
+    ${treeHtml}
+  </pre
+    >
+  `;
+  return html`
+    <div>
+      <button data-on:click="#highlightSelectors()">Highlight selector</button>
+      <button data-on:click="#hideEvent()">Close</button>
+    </div>
     ${treeHtml != null
       ? html`<div id="elements-tree" class="ht-tree">${treeHtml}</div>`
       : html``}
   `;
-}
-
-// Render the full panel shell containing the event table and detail pane.
-function renderContent(
-  events: SSEEvent[],
-  selectedEvent?: SSEEvent,
-  treeHtml?: string | null,
-): SafeHtml {
-  return html`
-    <div id="content">
-      <aside
-        id="json-signals"
-        data-signals__ifmissing="{dividerPosition: 50}"
-      ></aside>
-      ${selectedEvent === undefined
-        ? html`<div id="events" slot="start">${renderSseRows(events)}</div>`
-        : html` <wa-split-panel
-            orientation="vertical"
-            data-on:wa-reposition="$dividerPosition = evt.target.position"
-            data-attr:position="$dividerPosition"
-          >
-            <div id="events" slot="start">${renderSseRows(events)}</div>
-            <div id="event-detail" slot="end">
-              ${renderEventDetail(selectedEvent, treeHtml ?? null)}
-            </div>
-          </wa-split-panel>`}
-    </div>
-  `;
-}
-
-// Render the full list of SSE events as <tr> rows inside a single <tbody>
-function renderSseRows(events: SSEEvent[]): SafeHtml {
-  if (events.length === 0) {
-    return html`<table>
-      <thead>
-        <tr>
-          <th>Element</th>
-          <th>Type</th>
-          <th>Selector</th>
-          <th>Mode</th>
-        </tr>
-      </thead>
-      <tbody id="events-tbody">
-        <tr>
-          <td colspan="4"><em>No events captured yet.</em></td>
-        </tr>
-      </tbody>
-    </table>`;
-  }
-  return html`<table
-    data-on:click="#showEvent(evt.target.closest('tr').dataset.eventId)"
-  >
-    <thead>
-      <tr>
-        <th>Element</th>
-        <th>Type</th>
-        <th>Selector</th>
-        <th>Mode</th>
-      </tr>
-    </thead>
-    <tbody id="events-tbody">
-      ${events.map(
-        (event) => html`
-          <tr id="${`event-row-${event.id}`}" data-event-id="${event.id}">
-            <td>${event.el ?? ""}</td>
-            <td>${event.type}</td>
-            <td>${event.argsRaw?.selector ?? ""}</td>
-            <td>${event.argsRaw?.mode ?? ""}</td>
-          </tr>
-        `,
-      )}
-    </tbody>
-  </table>`;
 }
 
 // Render a signal patch as a JSON <pre> block (unused while signal broadcast is commented out)
@@ -186,17 +127,19 @@ export default defineBackground(() => {
       });
   }
 
-  const ports: Map<number, Set<Browser.runtime.Port>> = new Map();
-  const portToTabId = new Map<Browser.runtime.Port, number>();
+  const ports: Map<tabId, Set<Browser.runtime.Port>> = new Map();
+  const portToTabId = new Map<Browser.runtime.Port, tabId>();
 
-  // One ring buffer per tab, persists until tab is closed / removed
-  const sseBuffers = new Map<number, RingBuffer<SSEEvent>>();
+  // One array per tab, persists until tab is closed / removed
+  const sseBuffers = new Map<tabId, SSEEvent[]>();
   // Monotonic counter per tab for assigning stable event IDs
-  const sseCounters = new Map<number, number>();
+  const sseCounters = new Map<tabId, number>();
   // Currently selected event per tab (shown in the detail pane)
-  const sseSplitOpen = new Map<number, SSEEvent>();
+  const sseSplitOpen = new Map<tabId, SSEEvent>();
   // Cached ht-* tree HTML for the currently selected event per tab
-  const sseSplitOpenTreeHtml = new Map<number, string | null>();
+  const sseSplitOpenTreeHtml = new Map<tabId, SafeHtml | null>();
+  // Cached selectors for each event per tab
+  const sseSelectors = new Map<tabId, Map<string, string[]>>();
 
   let creating: Promise<void> | null = null;
 
@@ -237,14 +180,114 @@ export default defineBackground(() => {
     }
   }
 
-  async function highlightSelectors(event: SSEEvent): Promise<string[]> {
+  async function highlightSelectors(
+    tabId: tabId,
+    event: SSEEvent,
+  ): Promise<string[]> {
+    if (sseSelectors.has(tabId) && sseSelectors.get(tabId)!.has(event.id)) {
+      return sseSelectors.get(tabId)!.get(event.id)!;
+    }
     await ensureOffscreenDocument("/offscreen.html" as PublicPath);
-    const response = await browser.runtime.sendMessage({
+    const selectors = await browser.runtime.sendMessage({
       action: HIGHLIGHT_SELECTORS,
       target: "offscreen",
       event,
     });
-    return response;
+    if (sseSelectors.has(tabId)) {
+      sseSelectors.get(tabId)!.set(event.id, selectors);
+    } else {
+      sseSelectors.set(tabId, new Map([[event.id, selectors]]));
+    }
+    return selectors;
+  }
+
+  // Render the full list of SSE events as <tr> rows inside a single <tbody>
+  async function renderSseRows(
+    tabId: tabId,
+    events: SSEEvent[],
+  ): Promise<SafeHtml> {
+    if (events.length === 0) {
+      return html`<table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Selector</th>
+            <th>Elements</th>
+          </tr>
+        </thead>
+        <tbody id="events-tbody">
+          <tr>
+            <td colspan="4"><em>No events captured yet.</em></td>
+          </tr>
+        </tbody>
+      </table>`;
+    }
+
+    const rows = await Promise.all(
+      events.map(async (event) => {
+        const selectors = await highlightSelectors(tabId, event);
+        const selectorsString = selectors.join(", ");
+        return html`
+          <tr id="${`event-row-${event.id}`}" data-event-id="${event.id}">
+            <td>
+              ${event.type !== "elements"
+                ? html`<img src="${codeXml}" />`
+                : event.type}
+            </td>
+            <td>${selectorsString}</td>
+            <td>${event.argsRaw?.elements ?? ""}</td>
+          </tr>
+        `;
+      }),
+    );
+
+    return html`<table
+      data-on:click="#showEvent(evt.target.closest('tr').dataset.eventId)"
+    >
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Selector</th>
+          <th>Elements</th>
+        </tr>
+      </thead>
+      <tbody id="events-tbody">
+        ${rows}
+      </tbody>
+    </table>`;
+  }
+
+  // Render the full panel shell containing the event table and detail pane.
+  async function renderContent(
+    tabId: tabId,
+    events: SSEEvent[],
+    selectedEvent?: SSEEvent,
+    treeHtml?: SafeHtml | null,
+  ): Promise<SafeHtml> {
+    return html`
+      <div id="content">
+        <aside
+          id="json-signals"
+          data-signals__ifmissing="{dividerPosition: 50}"
+        ></aside>
+        ${selectedEvent === undefined
+          ? html`<div id="events" slot="start">
+              ${await renderSseRows(tabId, events)}
+            </div>`
+          : html` <wa-split-panel
+              orientation="vertical"
+              data-on:wa-reposition="$dividerPosition = evt.target.position"
+              data-attr:position="$dividerPosition"
+            >
+              <div id="events" slot="start">
+                ${await renderSseRows(tabId, events)}
+              </div>
+              <div id="event-detail" slot="end">
+                ${renderEventDetail(selectedEvent, treeHtml ?? null)}
+              </div>
+            </wa-split-panel>`}
+      </div>
+    `;
   }
 
   async function copyToClipboard(text: string): Promise<void> {
@@ -268,7 +311,7 @@ export default defineBackground(() => {
    * Ask the offscreen document to parse `elements` (raw HTML) and return a
    * serialised ht-* tree HTML string. Returns null on failure.
    */
-  async function renderHtmlTree(elements: string): Promise<string | null> {
+  async function renderHtmlTree(elements: string): Promise<SafeHtml | null> {
     try {
       await ensureOffscreenDocument("/offscreen.html" as PublicPath);
       const response = await browser.runtime.sendMessage({
@@ -284,7 +327,7 @@ export default defineBackground(() => {
         console.error("HTML tree render failed", error);
         return null;
       }
-      return response.html ?? null;
+      return response.html !== undefined ? new SafeHtml(response.html) : null;
     } catch (error) {
       console.error("HTML tree render failed", error);
       return null;
@@ -325,7 +368,7 @@ export default defineBackground(() => {
 
         // Send current SSE history to the newly connected panel
         const buffer = sseBuffers.get(tabId);
-        if (buffer && !buffer.isEmpty()) {
+        if (buffer && buffer.length > 0) {
           const selectedEvent = sseSplitOpen.get(tabId);
           // Use the cached tree HTML — no extra offscreen round-trip needed
           const treeHtml = sseSplitOpenTreeHtml.get(tabId) ?? null;
@@ -334,7 +377,7 @@ export default defineBackground(() => {
             selector: "",
             mode: "outer",
             elements: String(
-              renderContent(buffer.toArray(), selectedEvent, treeHtml),
+              await renderContent(tabId, buffer, selectedEvent, treeHtml),
             ),
           } satisfies PanelMessage);
         }
@@ -344,7 +387,7 @@ export default defineBackground(() => {
       if (action === SHOW_EVENT) {
         if (typeof data !== "string") return;
         const buffer = sseBuffers.get(tabId);
-        const events = buffer?.toArray() ?? [];
+        const events = buffer ?? [];
         const selectedEvent = events.find((e) => e.id === data);
         if (selectedEvent) {
           sseSplitOpen.set(tabId, selectedEvent);
@@ -359,21 +402,23 @@ export default defineBackground(() => {
           type: "patch-elements",
           selector: "",
           mode: "outer",
-          elements: String(renderContent(events, selectedEvent, treeHtml)),
+          elements: String(
+            await renderContent(tabId, events, selectedEvent, treeHtml),
+          ),
         } satisfies PanelMessage);
         return;
       }
 
       if (action === HIDE_EVENT) {
         const buffer = sseBuffers.get(tabId);
-        const events = buffer?.toArray() ?? [];
+        const events = buffer ?? [];
         sseSplitOpen.delete(tabId);
 
         port.postMessage({
           type: "patch-elements",
           selector: "",
           mode: "outer",
-          elements: String(renderContent(events)),
+          elements: String(await renderContent(tabId, events)),
         } satisfies PanelMessage);
         return;
       }
@@ -394,7 +439,7 @@ export default defineBackground(() => {
         const selectedEvent = sseSplitOpen.get(tabId);
         if (!selectedEvent) return;
         try {
-          selectors = await highlightSelectors(selectedEvent);
+          selectors = await highlightSelectors(tabId, selectedEvent);
         } catch (error) {
           console.error("Highlight selectors failed", error);
         }
@@ -426,7 +471,7 @@ export default defineBackground(() => {
     });
   });
 
-  browser.runtime.onMessage.addListener((msg: unknown, sender) => {
+  browser.runtime.onMessage.addListener(async (msg: unknown, sender) => {
     if (sender.id !== browser.runtime.id) return;
     const tabId = sender.tab?.id;
     if (typeof tabId !== "number") return;
@@ -472,18 +517,18 @@ export default defineBackground(() => {
       };
 
       if (!sseBuffers.has(tabId)) {
-        sseBuffers.set(tabId, new RingBuffer<SSEEvent>(100));
+        sseBuffers.set(tabId, []);
       }
       sseBuffers.get(tabId)!.push(sseEvent);
 
-      // No event is newly selected on ingest — broadcast without a tree
       broadcastToTab(tabId, {
         type: "patch-elements",
         selector: "",
         mode: "outer",
         elements: String(
-          renderContent(
-            sseBuffers.get(tabId)!.toArray(),
+          await renderContent(
+            tabId,
+            sseBuffers.get(tabId)!,
             sseSplitOpen.get(tabId),
             sseSplitOpenTreeHtml.get(tabId),
           ),
