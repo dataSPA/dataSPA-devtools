@@ -5,8 +5,10 @@ import radio from "~/assets/radio.svg";
 
 import {
   COPY_TO_CLIPBOARD,
-  DATASPA_DEVTOOLS,
+  DATASPA_DEVTOOLS_SIGNALS,
+  DATASPA_DEVTOOLS_SSE,
   DATASTAR_FETCH_EVENT,
+  DATASTAR_SIGNAL_PATCH_EVENT,
   GET_SIGNAL_ROOT,
   GET_SIGNAL_ROOT_REPLY,
   HIDE_EVENT,
@@ -105,10 +107,46 @@ function renderEventDetail(
 }
 
 // Render a signal patch as a JSON <pre> block (unused while signal broadcast is commented out)
-function _renderSignalPatch(patch: unknown): string {
+function renderSignalPatch(events: SSEEvent[]): string {
   return String(
-    html`<pre id="signal-patch">${JSON.stringify(patch, null, 2)}</pre>`,
+    html`<pre id="signal-patch">
+${events
+        .map((e) =>
+          JSON.stringify(JSON.parse(e.argsRaw?.signals ?? "{}"), null, 2),
+        )
+        .join("\n")}</pre
+    >`,
   );
+}
+
+/**
+ * Apply a JSON Merge Patch (RFC 7396) to a plain object.
+ * A null value in the patch means "delete this key".
+ */
+function applyMergePatch(
+  target: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...target };
+  for (const key of Object.keys(patch)) {
+    if (patch[key] === null) {
+      delete result[key];
+    } else if (
+      typeof patch[key] === "object" &&
+      !Array.isArray(patch[key]) &&
+      typeof result[key] === "object" &&
+      result[key] !== null &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = applyMergePatch(
+        result[key] as Record<string, unknown>,
+        patch[key] as Record<string, unknown>,
+      );
+    } else {
+      result[key] = patch[key];
+    }
+  }
+  return result;
 }
 
 // Render a signal root snapshot as a JSON <pre> block
@@ -131,6 +169,7 @@ export default defineBackground(() => {
 
   const ports: Map<tabId, Set<Browser.runtime.Port>> = new Map();
   const portToTabId = new Map<Browser.runtime.Port, tabId>();
+  const portType = new Map<Browser.runtime.Port, "sse" | "signals">();
 
   // One ring buffer per tab, persists until tab is closed / removed.
   // Capped at SSE_BUFFER_CAPACITY to prevent unbounded memory growth.
@@ -143,6 +182,8 @@ export default defineBackground(() => {
   const sseSplitOpenTreeHtml = new Map<tabId, SafeHtml | null>();
   // Cached selectors for each event per tab
   const sseSelectors = new Map<tabId, Map<string, string[]>>();
+  // Cached signal root snapshot per tab, kept in sync via merge patches
+  const signalRoots = new Map<tabId, Record<string, unknown>>();
 
   // Batching state: accumulate events during a short window before rendering
   const BATCH_DELAY_MS = 16;
@@ -274,7 +315,7 @@ export default defineBackground(() => {
   }
 
   // Render the full panel shell containing the event table and detail pane.
-  async function renderContent(
+  async function renderSSEPanelContent(
     tabId: tabId,
     events: SSEEvent[],
     selectedEvent?: SSEEvent,
@@ -350,11 +391,24 @@ export default defineBackground(() => {
     }
   }
 
-  function broadcastToTab(tabId: number, message: PanelMessage) {
+  function broadcastToSSEPorts(tabId: number, message: PanelMessage) {
     const allPorts = ports.get(tabId);
     if (allPorts) {
       for (const port of allPorts) {
-        port.postMessage(message);
+        if (portType.get(port) === "sse") {
+          port.postMessage(message);
+        }
+      }
+    }
+  }
+
+  function broadcastToSignalsPorts(tabId: number, message: PanelMessage) {
+    const allPorts = ports.get(tabId);
+    if (allPorts) {
+      for (const port of allPorts) {
+        if (portType.get(port) === "signals") {
+          port.postMessage(message);
+        }
       }
     }
   }
@@ -377,18 +431,31 @@ export default defineBackground(() => {
       buffer.push(event);
     }
 
-    broadcastToTab(tabId, {
+    broadcastToSSEPorts(tabId, {
       type: "patch-elements",
       selector: "",
       mode: "outer",
       elements: String(
-        await renderContent(
+        await renderSSEPanelContent(
           tabId,
           buffer.toArray(),
           sseSplitOpen.get(tabId),
           sseSplitOpenTreeHtml.get(tabId),
         ),
       ),
+    });
+
+    const signalEvents = buffer
+      .toArray()
+      .filter(
+        (event): event is SSEEvent => event.type === DATASTAR_PATCH_SIGNALS,
+      );
+
+    broadcastToSignalsPorts(tabId, {
+      type: "patch-elements",
+      selector: "",
+      mode: "outer",
+      elements: String(renderSignalPatch(signalEvents)),
     });
   }
 
@@ -400,6 +467,7 @@ export default defineBackground(() => {
     sseSplitOpen.delete(tabId);
     sseSplitOpenTreeHtml.delete(tabId);
     sseSelectors.delete(tabId);
+    signalRoots.delete(tabId);
     pendingEvents.delete(tabId);
     const timer = pendingTimers.get(tabId);
     if (timer) {
@@ -407,14 +475,14 @@ export default defineBackground(() => {
       pendingTimers.delete(tabId);
     }
 
-    // Push an empty render to any open panels so they clear immediately
+    // Push an empty render to any open SSE panels so they clear immediately
     // rather than showing stale events until the next incoming event.
     if (ports.has(tabId)) {
-      broadcastToTab(tabId, {
+      broadcastToSSEPorts(tabId, {
         type: "patch-elements",
         selector: "",
         mode: "outer",
-        elements: String(await renderContent(tabId, [])),
+        elements: String(await renderSSEPanelContent(tabId, [])),
       });
     }
   }
@@ -431,7 +499,11 @@ export default defineBackground(() => {
   });
 
   browser.runtime.onConnect.addListener((port) => {
-    if (port.name !== DATASPA_DEVTOOLS) return;
+    if (
+      port.name !== DATASPA_DEVTOOLS_SSE &&
+      port.name !== DATASPA_DEVTOOLS_SIGNALS
+    )
+      return;
 
     port.onMessage.addListener(async (msg: unknown) => {
       if (!isDevtoolsPortMessage(msg)) return;
@@ -444,26 +516,43 @@ export default defineBackground(() => {
         }
         ports.get(tabId)?.add(port);
         portToTabId.set(port, tabId);
+        portType.set(
+          port,
+          port.name === DATASPA_DEVTOOLS_SSE ? "sse" : "signals",
+        );
 
-        // Send current SSE history to the newly connected panel
-        const buffer = sseBuffers.get(tabId);
-        if (buffer && buffer.getSize() > 0) {
-          const selectedEvent = sseSplitOpen.get(tabId);
-          // Use the cached tree HTML — no extra offscreen round-trip needed
-          const treeHtml = sseSplitOpenTreeHtml.get(tabId) ?? null;
-          port.postMessage({
-            type: "patch-elements",
-            selector: "",
-            mode: "outer",
-            elements: String(
-              await renderContent(
-                tabId,
-                buffer.toArray(),
-                selectedEvent,
-                treeHtml,
+        if (port.name === DATASPA_DEVTOOLS_SSE) {
+          // Send current SSE history to the newly connected SSE panel
+          const buffer = sseBuffers.get(tabId);
+          if (buffer && buffer.getSize() > 0) {
+            const selectedEvent = sseSplitOpen.get(tabId);
+            // Use the cached tree HTML — no extra offscreen round-trip needed
+            const treeHtml = sseSplitOpenTreeHtml.get(tabId) ?? null;
+            port.postMessage({
+              type: "patch-elements",
+              selector: "",
+              mode: "outer",
+              elements: String(
+                await renderSSEPanelContent(
+                  tabId,
+                  buffer.toArray(),
+                  selectedEvent,
+                  treeHtml,
+                ),
               ),
-            ),
-          } satisfies PanelMessage);
+            } satisfies PanelMessage);
+          }
+        } else {
+          // Send cached signal root to the newly connected Signals panel
+          const root = signalRoots.get(tabId);
+          if (root !== undefined) {
+            port.postMessage({
+              type: "patch-elements",
+              selector: "",
+              mode: "outer",
+              elements: renderSignalRoot(root),
+            } satisfies PanelMessage);
+          }
         }
         return;
       }
@@ -487,7 +576,7 @@ export default defineBackground(() => {
           selector: "",
           mode: "outer",
           elements: String(
-            await renderContent(tabId, events, selectedEvent, treeHtml),
+            await renderSSEPanelContent(tabId, events, selectedEvent, treeHtml),
           ),
         } satisfies PanelMessage);
         return;
@@ -502,7 +591,7 @@ export default defineBackground(() => {
           type: "patch-elements",
           selector: "",
           mode: "outer",
-          elements: String(await renderContent(tabId, events)),
+          elements: String(await renderSSEPanelContent(tabId, events)),
         } satisfies PanelMessage);
         return;
       }
@@ -552,6 +641,7 @@ export default defineBackground(() => {
         if (set.size === 0) ports.delete(tabId);
       }
       portToTabId.delete(port);
+      portType.delete(port);
     });
   });
 
@@ -623,19 +713,30 @@ export default defineBackground(() => {
           setTimeout(() => flushPendingEvents(tabId), BATCH_DELAY_MS),
         );
       }
-      // } else if (type === DATASTAR_SIGNAL_PATCH_EVENT) {
-      //   const patch = parseJson(payload.data)
-      //   broadcastToTab(tabId, {
-      //     type: 'patch-elements',
-      //     selector: '#signal-patch-container',
-      //     mode: 'outer',
-      //     elements: _renderSignalPatch(patch),
-      //   })
+    } else if (type === DATASTAR_SIGNAL_PATCH_EVENT) {
+      // Merge the incoming delta patch onto the cached signal root snapshot
+      // so the Signals panel always shows the complete, current store state.
+      const patch = parseJson(payload.data);
+      if (isRecord(patch)) {
+        const current = signalRoots.get(tabId) ?? {};
+        const updated = applyMergePatch(current, patch);
+        signalRoots.set(tabId, updated);
+        broadcastToSignalsPorts(tabId, {
+          type: "patch-elements",
+          selector: "",
+          mode: "outer",
+          elements: renderSignalRoot(updated),
+        });
+      }
     } else if (type === GET_SIGNAL_ROOT_REPLY) {
+      // Cache the full snapshot so subsequent patches have a base to merge onto
       const root = parseJson(payload.data);
-      broadcastToTab(tabId, {
+      if (isRecord(root)) {
+        signalRoots.set(tabId, root);
+      }
+      broadcastToSignalsPorts(tabId, {
         type: "patch-elements",
-        selector: "#signal-root-container",
+        selector: "",
         mode: "outer",
         elements: renderSignalRoot(root),
       });

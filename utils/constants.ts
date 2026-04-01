@@ -22,4 +22,6 @@ export const COPY_TO_CLIPBOARD = "copy-to-clipboard";
 
 export const HIGHLIGHT_STYLE = "dataSPADevtoolsHighlightStyle";
 export const DATASPA_DEVTOOLS = "dataSPADevtools";
+export const DATASPA_DEVTOOLS_SSE = "dataSPADevtoolsSSE";
+export const DATASPA_DEVTOOLS_SIGNALS = "dataSPADevtoolsSignals";
 export const PAGE_BRIDGE_VERSION = 1;
