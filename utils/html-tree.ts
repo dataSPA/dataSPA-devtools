@@ -213,11 +213,11 @@ function buildNode(node: Node, depth: number): HTMLElement | null {
   return null;
 }
 
-function prettyHTML(node, indent = 0): string {
+function prettyHTML(node: HTMLElement, indent = 0): string {
   const pad = "  ".repeat(indent);
 
   if (node.nodeType === Node.TEXT_NODE) {
-    const text = node.textContent.trim();
+    const text = node.textContent?.trim();
     return text ? `${pad}${text}\n` : "";
   }
 
@@ -229,7 +229,7 @@ function prettyHTML(node, indent = 0): string {
     .join("");
 
   const children = [...node.childNodes]
-    .map((child) => prettyHTML(child, indent + 1))
+    .map((child) => prettyHTML(child as HTMLElement, indent + 1))
     .join("\n");
 
   if (!children.trim()) return `${pad}<${tag}${attrs} />\n`;

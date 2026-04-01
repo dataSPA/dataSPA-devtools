@@ -25,6 +25,9 @@ import {
 } from "~/utils/guards";
 import { html, SafeHtml } from "~/utils/html";
 import type { PanelMessage, SSEEvent } from "~/utils/types";
+import { RingBuffer } from "~/utils/types";
+
+const SSE_BUFFER_CAPACITY = 500;
 
 type tabId = number;
 
@@ -88,7 +91,7 @@ function renderEventDetail(
       <div>
         <button data-on:click="#hideEvent()">Close</button>
       </div>
-      <pre>${JSON.stringify(signals, null, 2)}</pre>
+      <pre id="details">${JSON.stringify(signals, null, 2)}</pre>
     `;
   }
 
@@ -97,7 +100,7 @@ function renderEventDetail(
       <button data-on:click="#highlightSelectors()">Highlight selector</button>
       <button data-on:click="#hideEvent()">Close</button>
     </div>
-    <pre>${treeHtml}</pre>
+    <pre id="details">${treeHtml}</pre>
   `;
 }
 
@@ -129,8 +132,9 @@ export default defineBackground(() => {
   const ports: Map<tabId, Set<Browser.runtime.Port>> = new Map();
   const portToTabId = new Map<Browser.runtime.Port, tabId>();
 
-  // One array per tab, persists until tab is closed / removed
-  const sseBuffers = new Map<tabId, SSEEvent[]>();
+  // One ring buffer per tab, persists until tab is closed / removed.
+  // Capped at SSE_BUFFER_CAPACITY to prevent unbounded memory growth.
+  const sseBuffers = new Map<tabId, RingBuffer<SSEEvent>>();
   // Monotonic counter per tab for assigning stable event IDs
   const sseCounters = new Map<tabId, number>();
   // Currently selected event per tab (shown in the detail pane)
@@ -139,6 +143,11 @@ export default defineBackground(() => {
   const sseSplitOpenTreeHtml = new Map<tabId, SafeHtml | null>();
   // Cached selectors for each event per tab
   const sseSelectors = new Map<tabId, Map<string, string[]>>();
+
+  // Batching state: accumulate events during a short window before rendering
+  const BATCH_DELAY_MS = 16;
+  const pendingEvents = new Map<tabId, SSEEvent[]>();
+  const pendingTimers = new Map<tabId, ReturnType<typeof setTimeout>>();
 
   let creating: Promise<void> | null = null;
 
@@ -250,9 +259,7 @@ export default defineBackground(() => {
       }),
     );
 
-    return html`<table
-      data-on:click="#showEvent(evt.target.closest('tr').dataset.eventId)"
-    >
+    return html`<table data-on:click="#showEvent(evt)">
       <thead>
         <tr>
           <th>Type</th>
@@ -352,12 +359,75 @@ export default defineBackground(() => {
     }
   }
 
-  // Clean up SSE buffer when a tab is closed
-  browser.tabs.onRemoved.addListener((tabId) => {
+  /**
+   * Flush all pending events for a tab into the ring buffer and broadcast
+   * a single re-render. Called after the batch delay window expires.
+   */
+  async function flushPendingEvents(tabId: tabId) {
+    pendingTimers.delete(tabId);
+    const events = pendingEvents.get(tabId);
+    if (!events || events.length === 0) return;
+    pendingEvents.delete(tabId);
+
+    if (!sseBuffers.has(tabId)) {
+      sseBuffers.set(tabId, new RingBuffer<SSEEvent>(SSE_BUFFER_CAPACITY));
+    }
+    const buffer = sseBuffers.get(tabId)!;
+    for (const event of events) {
+      buffer.push(event);
+    }
+
+    broadcastToTab(tabId, {
+      type: "patch-elements",
+      selector: "",
+      mode: "outer",
+      elements: String(
+        await renderContent(
+          tabId,
+          buffer.toArray(),
+          sseSplitOpen.get(tabId),
+          sseSplitOpenTreeHtml.get(tabId),
+        ),
+      ),
+    });
+  }
+
+  // Clean up all per-tab state when a tab is closed or navigates, and push
+  // an empty render to any open panels so the UI clears immediately.
+  async function clearTabState(tabId: tabId) {
     sseBuffers.delete(tabId);
     sseCounters.delete(tabId);
     sseSplitOpen.delete(tabId);
     sseSplitOpenTreeHtml.delete(tabId);
+    sseSelectors.delete(tabId);
+    pendingEvents.delete(tabId);
+    const timer = pendingTimers.get(tabId);
+    if (timer) {
+      clearTimeout(timer);
+      pendingTimers.delete(tabId);
+    }
+
+    // Push an empty render to any open panels so they clear immediately
+    // rather than showing stale events until the next incoming event.
+    if (ports.has(tabId)) {
+      broadcastToTab(tabId, {
+        type: "patch-elements",
+        selector: "",
+        mode: "outer",
+        elements: String(await renderContent(tabId, [])),
+      });
+    }
+  }
+
+  browser.tabs.onRemoved.addListener(async (tabId) => {
+    await clearTabState(tabId);
+  });
+
+  // Clear stale events when a tab navigates to a new page
+  browser.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+    if (changeInfo.url) {
+      await clearTabState(tabId);
+    }
   });
 
   browser.runtime.onConnect.addListener((port) => {
@@ -377,7 +447,7 @@ export default defineBackground(() => {
 
         // Send current SSE history to the newly connected panel
         const buffer = sseBuffers.get(tabId);
-        if (buffer && buffer.length > 0) {
+        if (buffer && buffer.getSize() > 0) {
           const selectedEvent = sseSplitOpen.get(tabId);
           // Use the cached tree HTML — no extra offscreen round-trip needed
           const treeHtml = sseSplitOpenTreeHtml.get(tabId) ?? null;
@@ -386,7 +456,12 @@ export default defineBackground(() => {
             selector: "",
             mode: "outer",
             elements: String(
-              await renderContent(tabId, buffer, selectedEvent, treeHtml),
+              await renderContent(
+                tabId,
+                buffer.toArray(),
+                selectedEvent,
+                treeHtml,
+              ),
             ),
           } satisfies PanelMessage);
         }
@@ -396,8 +471,8 @@ export default defineBackground(() => {
       if (action === SHOW_EVENT) {
         if (typeof data !== "string") return;
         const buffer = sseBuffers.get(tabId);
-        const events = buffer ?? [];
-        const selectedEvent = events.find((e) => e.id === data);
+        const events = buffer?.toArray() ?? [];
+        const selectedEvent = events.find((e: SSEEvent) => e.id === data);
         if (selectedEvent) {
           sseSplitOpen.set(tabId, selectedEvent);
         }
@@ -420,7 +495,7 @@ export default defineBackground(() => {
 
       if (action === HIDE_EVENT) {
         const buffer = sseBuffers.get(tabId);
-        const events = buffer ?? [];
+        const events = buffer?.toArray() ?? [];
         sseSplitOpen.delete(tabId);
 
         port.postMessage({
@@ -534,24 +609,20 @@ export default defineBackground(() => {
           : undefined,
       };
 
-      if (!sseBuffers.has(tabId)) {
-        sseBuffers.set(tabId, []);
+      // Queue the event for batched rendering instead of rendering immediately.
+      // Events arriving within BATCH_DELAY_MS of each other are coalesced into
+      // a single render pass, avoiding redundant O(n) re-renders during bursts.
+      if (!pendingEvents.has(tabId)) {
+        pendingEvents.set(tabId, []);
       }
-      sseBuffers.get(tabId)!.push(sseEvent);
+      pendingEvents.get(tabId)!.push(sseEvent);
 
-      broadcastToTab(tabId, {
-        type: "patch-elements",
-        selector: "",
-        mode: "outer",
-        elements: String(
-          await renderContent(
-            tabId,
-            sseBuffers.get(tabId)!,
-            sseSplitOpen.get(tabId),
-            sseSplitOpenTreeHtml.get(tabId),
-          ),
-        ),
-      });
+      if (!pendingTimers.has(tabId)) {
+        pendingTimers.set(
+          tabId,
+          setTimeout(() => flushPendingEvents(tabId), BATCH_DELAY_MS),
+        );
+      }
       // } else if (type === DATASTAR_SIGNAL_PATCH_EVENT) {
       //   const patch = parseJson(payload.data)
       //   broadcastToTab(tabId, {

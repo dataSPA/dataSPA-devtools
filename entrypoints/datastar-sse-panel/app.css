@@ -12,6 +12,10 @@ table {
     font-size: 10px;
 }
 
+#details {
+    margin-inline: 5px;
+}
+
 td {
     padding-block: 0;
     padding-inline: 2px;

@@ -17,7 +17,8 @@ port.postMessage({
 
 attachPanelMessageListener(port);
 
-registerHelper("showEvent", (id: string) => {
+registerHelper("showEvent", (evt: MouseEvent | TouchEvent) => {
+  const id = (evt.target as HTMLElement)?.closest("tr")?.dataset.eventId;
   port.postMessage({ action: SHOW_EVENT, tabId, data: id });
 });
 

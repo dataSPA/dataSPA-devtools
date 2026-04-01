@@ -12,15 +12,10 @@
 import type { SSEEvent } from "@/utils/types";
 import {
   COPY_TO_CLIPBOARD,
-  RENDER_HTML_TREE,
   HIGHLIGHT_SELECTORS,
+  RENDER_HTML_TREE,
 } from "~/utils/constants";
 import { buildHtmlTree } from "~/utils/html-tree";
-
-type HighlightSelectorsResponse = {
-  ok: boolean;
-  error?: string;
-};
 
 type ClipboardResponse = {
   ok: boolean;
