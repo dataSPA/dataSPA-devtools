@@ -19,6 +19,8 @@ export const SEND_TO_CONSOLE = "send-to-console";
 export const HIGHLIGHT_SELECTORS = "highlight-selectors";
 export const REMOVE_HIGHLIGHTS = "remove-highlights";
 export const COPY_TO_CLIPBOARD = "copy-to-clipboard";
+export const EDIT_SIGNAL = "edit-signal";
+export const SAVE_SIGNAL = "save-signal";
 
 export const HIGHLIGHT_STYLE = "dataSPADevtoolsHighlightStyle";
 export const DATASPA_DEVTOOLS = "dataSPADevtools";

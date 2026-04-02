@@ -8,7 +8,9 @@ import {
   DATASPA_DEVTOOLS_SIGNALS,
   DATASPA_DEVTOOLS_SSE,
   DATASTAR_FETCH_EVENT,
+  DATASTAR_PATCH_SIGNALS,
   DATASTAR_SIGNAL_PATCH_EVENT,
+  EDIT_SIGNAL,
   GET_SIGNAL_ROOT,
   GET_SIGNAL_ROOT_REPLY,
   HIDE_EVENT,
@@ -16,6 +18,7 @@ import {
   PORT_INIT,
   REMOVE_HIGHLIGHTS,
   RENDER_HTML_TREE,
+  SAVE_SIGNAL,
   SEND_TO_CONSOLE,
   SHOW_EVENT,
 } from "~/utils/constants";
@@ -26,7 +29,7 @@ import {
   parseJson,
 } from "~/utils/guards";
 import { html, SafeHtml } from "~/utils/html";
-import type { PanelMessage, SSEEvent } from "~/utils/types";
+import type { PanelMessage, SaveSignalMessage, SSEEvent } from "~/utils/types";
 import { RingBuffer } from "~/utils/types";
 
 const SSE_BUFFER_CAPACITY = 500;
@@ -64,6 +67,8 @@ function isDevtoolsPortMessage(msg: unknown): msg is DevtoolsPortMessage {
   if (msg.action === PORT_INIT) return true;
   if (msg.action === SHOW_EVENT) return true;
   if (msg.action === HIDE_EVENT) return true;
+  if (msg.action === EDIT_SIGNAL) return true;
+  if (msg.action === SAVE_SIGNAL) return true;
   if (msg.action === COPY_TO_CLIPBOARD) return typeof msg.data === "string";
 
   return FORWARDED_TAB_ACTIONS.has(msg.action);
@@ -87,7 +92,7 @@ function renderEventDetail(
   if (!event) {
     return html``;
   }
-  if (event.type === "datastar-patch-signals") {
+  if (event.type === DATASTAR_PATCH_SIGNALS) {
     const signals = JSON.parse(event.argsRaw?.signals ?? "{}");
     return html`
       <div>
@@ -111,9 +116,16 @@ function renderSignalPatch(events: SSEEvent[]): string {
   return String(
     html`<pre id="signal-patch">
 ${events
-        .map((e) =>
-          JSON.stringify(JSON.parse(e.argsRaw?.signals ?? "{}"), null, 2),
-        )
+        .map((e) => {
+          if (e.replayed) {
+            return "";
+          }
+          return JSON.stringify(
+            JSON.parse(e.argsRaw?.signals ?? "{}"),
+            null,
+            2,
+          );
+        })
         .join("\n")}</pre
     >`,
   );
@@ -149,11 +161,96 @@ function applyMergePatch(
   return result;
 }
 
-// Render a signal root snapshot as a JSON <pre> block
-function renderSignalRoot(root: unknown): string {
-  return String(
-    html`<pre id="signal-root">${JSON.stringify(root, null, 2)}</pre>`,
+/**
+ * Recursively collect all leaf [keyPath, value] pairs from a nested object.
+ * Arrays are treated as scalar values (JSON-stringified).
+ */
+function flattenLeaves(
+  obj: Record<string, unknown>,
+  prefix = "",
+): [string, unknown][] {
+  if (!obj) return [];
+  const result: [string, unknown][] = [];
+  for (const key of Object.keys(obj)) {
+    if (key === "_rocket") continue;
+
+    const path = prefix ? `${prefix}.${key}` : key;
+    const val = obj[key];
+    if (val !== null && typeof val === "object" && !Array.isArray(val)) {
+      result.push(...flattenLeaves(val as Record<string, unknown>, path));
+    } else {
+      result.push([path, val]);
+    }
+  }
+  return result;
+}
+
+/**
+ * Truncate a string in the middle, preserving both the start and end.
+ * Biased toward showing more of the end (most significant part of a dotted key).
+ * e.g. middleTruncate("my.long.something.Key.name", 24) → "my.long.s…Key.name"
+ */
+function middleTruncate(str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str;
+  const suffixLen = Math.floor(maxLen * 0.55);
+  const prefixLen = maxLen - suffixLen - 1;
+  return str.slice(0, prefixLen) + "…" + str.slice(-suffixLen);
+}
+
+// Render the merged signal root as a two-column CSS grid of divs.
+// Arrays are shown as JSON strings. Each row uses .signal-key / .signal-value
+// so that value cells can later be swapped out for <input> controls.
+function renderSignalRoot(root: unknown, signalEdits: Set<string>): string {
+  const leaves = flattenLeaves(root as Record<string, unknown>);
+  if (leaves.length === 0) {
+    return String(
+      html`<div id="signal-root" class="signal-grid">
+        <div class="signal-empty"><em>No signals yet.</em></div>
+      </div>`,
+    );
+  }
+
+  leaves.sort((a, b) => a[0].localeCompare(b[0]));
+
+  const rows = leaves.map(
+    ([path, value]) =>
+      html`<div class="signal-key" title="${path}">
+          ${middleTruncate(path, 50)}
+        </div>
+        ${signalEdits.has(path)
+          ? getEditorFor(path, value)
+          : html`<div
+              class="signal-value"
+              data-on:dblClick="#editSignal('${path}')"
+            >
+              ${value === null
+                ? "null"
+                : Array.isArray(value)
+                  ? JSON.stringify(value)
+                  : String(value)}
+            </div>`}`,
   );
+  return String(html`<div id="signal-root" class="signal-grid">${rows}</div>`);
+}
+
+function getEditorFor(path: string, value: any): SafeHtml {
+  let ret: SafeHtml;
+  switch (typeof value) {
+    case "boolean":
+      ret = html`<input type="checkbox" data-bind="${path}" />`;
+      break;
+    default:
+      ret = html`<input data-bind="${path}" value="${value}" />`;
+  }
+  return html`<div
+    class="signal-editor"
+    data-signals="${JSON.stringify({ [path]: value })}"
+  >
+    ${ret}
+    <button type="button" data-on:click="#saveSignal('${path}', $${path})">
+      Save
+    </button>
+  </div>`;
 }
 
 export default defineBackground(() => {
@@ -184,6 +281,7 @@ export default defineBackground(() => {
   const sseSelectors = new Map<tabId, Map<string, string[]>>();
   // Cached signal root snapshot per tab, kept in sync via merge patches
   const signalRoots = new Map<tabId, Record<string, unknown>>();
+  const signalEdits = new Map<tabId, Set<string>>();
 
   // Batching state: accumulate events during a short window before rendering
   const BATCH_DELAY_MS = 16;
@@ -274,6 +372,9 @@ export default defineBackground(() => {
 
     const rows = await Promise.all(
       events.map(async (event) => {
+        if (event.replayed) {
+          return;
+        }
         if (event.type === "datastar-patch-elements") {
           const selectors = await highlightSelectors(tabId, event);
           const selectorsString = selectors.join(", ");
@@ -287,7 +388,7 @@ export default defineBackground(() => {
             </tr>
           `;
         }
-        if (event.type === "datastar-patch-signals") {
+        if (event.type === DATASTAR_PATCH_SIGNALS) {
           return html`
             <tr id="${`event-row-${event.id}`}" data-event-id="${event.id}">
               <td>
@@ -468,6 +569,7 @@ export default defineBackground(() => {
     sseSplitOpenTreeHtml.delete(tabId);
     sseSelectors.delete(tabId);
     signalRoots.delete(tabId);
+    signalEdits.delete(tabId);
     pendingEvents.delete(tabId);
     const timer = pendingTimers.get(tabId);
     if (timer) {
@@ -550,7 +652,10 @@ export default defineBackground(() => {
               type: "patch-elements",
               selector: "",
               mode: "outer",
-              elements: renderSignalRoot(root),
+              elements: renderSignalRoot(
+                root,
+                signalEdits.get(tabId) ?? new Set(),
+              ),
             } satisfies PanelMessage);
           }
         }
@@ -603,6 +708,50 @@ export default defineBackground(() => {
         } catch (error) {
           console.error("Clipboard copy failed", error);
         }
+        return;
+      }
+
+      if (action === EDIT_SIGNAL) {
+        if (!signalEdits.has(tabId)) {
+          signalEdits.set(tabId, new Set([data as string]));
+        } else {
+          signalEdits.get(tabId)?.add(data as string);
+        }
+        broadcastToSignalsPorts(tabId, {
+          type: "patch-elements",
+          selector: "",
+          mode: "outer",
+          elements: renderSignalRoot(
+            signalRoots.get(tabId),
+            signalEdits.get(tabId) ?? new Set(),
+          ),
+        });
+        return;
+      }
+
+      if (action === SAVE_SIGNAL) {
+        if (signalEdits.has(tabId)) {
+          for (const key in data as object) {
+            signalEdits.get(tabId)?.delete(key);
+          }
+        }
+        try {
+          await browser.tabs.sendMessage(tabId, {
+            action: SAVE_SIGNAL,
+            data,
+          });
+        } catch (error) {
+          console.error(`Failed to send tab message for tab ${tabId}`, error);
+        }
+        broadcastToSignalsPorts(tabId, {
+          type: "patch-elements",
+          selector: "",
+          mode: "outer",
+          elements: renderSignalRoot(
+            signalRoots.get(tabId),
+            signalEdits.get(tabId) ?? new Set(),
+          ),
+        });
         return;
       }
 
@@ -688,7 +837,7 @@ export default defineBackground(() => {
                     ? eventData.argsRaw.mode
                     : undefined,
               }
-            : eventData.type === "datastar-patch-signals"
+            : eventData.type === DATASTAR_PATCH_SIGNALS
               ? {
                   signals:
                     typeof eventData.argsRaw.signals === "string"
@@ -725,7 +874,10 @@ export default defineBackground(() => {
           type: "patch-elements",
           selector: "",
           mode: "outer",
-          elements: renderSignalRoot(updated),
+          elements: renderSignalRoot(
+            updated,
+            signalEdits.get(tabId) ?? new Set(),
+          ),
         });
       }
     } else if (type === GET_SIGNAL_ROOT_REPLY) {
@@ -738,7 +890,7 @@ export default defineBackground(() => {
         type: "patch-elements",
         selector: "",
         mode: "outer",
-        elements: renderSignalRoot(root),
+        elements: renderSignalRoot(root, signalEdits.get(tabId) ?? new Set()),
       });
     }
   });

@@ -5,6 +5,7 @@ import {
   HIGHLIGHT_SELECTORS,
   HIGHLIGHT_STYLE,
   PAGE_BRIDGE_VERSION,
+  SAVE_SIGNAL,
   REMOVE_HIGHLIGHTS,
   SEND_TO_CONSOLE,
 } from "~/utils/constants";
@@ -54,6 +55,17 @@ export default defineContentScript({
               source: DATASPA_DEVTOOLS,
               version: PAGE_BRIDGE_VERSION,
               type: GET_SIGNAL_ROOT,
+            },
+            postMessageTargetOrigin,
+          );
+          break;
+        case SAVE_SIGNAL:
+          window.postMessage(
+            {
+              source: DATASPA_DEVTOOLS,
+              version: PAGE_BRIDGE_VERSION,
+              type: SAVE_SIGNAL,
+              data: msg.data,
             },
             postMessageTargetOrigin,
           );

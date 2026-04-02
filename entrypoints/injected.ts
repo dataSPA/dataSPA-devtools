@@ -1,179 +1,195 @@
 import {
   DATASPA_DEVTOOLS,
   DATASTAR_FETCH_EVENT,
+  DATASTAR_PATCH_SIGNALS,
   DATASTAR_SIGNAL_PATCH_EVENT,
   GET_SIGNAL_ROOT,
   GET_SIGNAL_ROOT_REPLY,
   PAGE_BRIDGE_VERSION,
-} from '~/utils/constants'
-import type { DSFetchDetail, SignalEvent } from '~/utils/types'
+  SAVE_SIGNAL,
+} from "~/utils/constants";
+import type {
+  DSFetchDetail,
+  SaveSignalMessage,
+  SignalEvent,
+  SSEEvent,
+} from "~/utils/types";
 
 type BridgeMessage =
   | {
-      source: typeof DATASPA_DEVTOOLS
-      version: number
-      type: typeof DATASTAR_FETCH_EVENT | typeof DATASTAR_SIGNAL_PATCH_EVENT
-      payload: { data: string; el?: string }
+      source: typeof DATASPA_DEVTOOLS;
+      version: number;
+      type: typeof DATASTAR_FETCH_EVENT | typeof DATASTAR_SIGNAL_PATCH_EVENT;
+      payload: { data: string; el?: string };
     }
   | {
-      source: typeof DATASPA_DEVTOOLS
-      version: number
-      type: typeof GET_SIGNAL_ROOT_REPLY
-      payload: { data: string; error?: string }
-    }
+      source: typeof DATASPA_DEVTOOLS;
+      version: number;
+      type: typeof GET_SIGNAL_ROOT_REPLY;
+      payload: { data: string; error?: string };
+    };
 
 function cssEscape(value: string) {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(value)
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
   }
-  return value.replace(/[^a-zA-Z0-9_-]/g, '\\$&')
+  return value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
 }
 
 function safeQuerySelectorAll(selector: string): Element[] {
   try {
-    return Array.from(document.querySelectorAll(selector))
+    return Array.from(document.querySelectorAll(selector));
   } catch {
-    return []
+    return [];
   }
 }
 
 function getPostMessageTargetOrigin() {
-  return window.location.origin === 'null' ? '*' : window.location.origin
+  return window.location.origin === "null" ? "*" : window.location.origin;
 }
 
 function safeJSONStringify(value: unknown): string {
   try {
-    return JSON.stringify(value)
+    return JSON.stringify(value);
   } catch {
-    return JSON.stringify({ error: 'Unable to serialize payload' })
+    return JSON.stringify({ error: "Unable to serialize payload" });
   }
 }
 
 function postBridgeMessage(message: BridgeMessage) {
-  window.postMessage(message, getPostMessageTargetOrigin())
+  window.postMessage(message, getPostMessageTargetOrigin());
 }
 
 function getElementSelector(element: HTMLElement) {
   if (element.id) {
-    return `#${cssEscape(element.id)}`
+    return `#${cssEscape(element.id)}`;
   }
 
-  if (element.tagName === 'BODY') {
-    return 'body'
+  if (element.tagName === "BODY") {
+    return "body";
   }
 
-  let selector = element.tagName.toLowerCase()
+  let selector = element.tagName.toLowerCase();
 
-  const classNames = Array.from(element.classList)
+  const classNames = Array.from(element.classList);
   if (classNames.length > 0) {
-    selector += `.${classNames.map((name) => cssEscape(name)).join('.')}`
+    selector += `.${classNames.map((name) => cssEscape(name)).join(".")}`;
   }
 
   if (element.parentNode) {
-    const siblings = Array.from(element.parentNode.children)
-    const index = siblings.indexOf(element) + 1
+    const siblings = Array.from(element.parentNode.children);
+    const index = siblings.indexOf(element) + 1;
     if (siblings.length > 1) {
-      selector += `:nth-child(${index})`
+      selector += `:nth-child(${index})`;
     }
   }
-  return selector
+  return selector;
 }
 
 function getUniqueSelector(element: HTMLElement) {
-  const selector = getElementSelector(element)
-  let elements = safeQuerySelectorAll(selector)
+  const selector = getElementSelector(element);
+  let elements = safeQuerySelectorAll(selector);
 
   if (elements.length === 1) {
-    return selector
+    return selector;
   }
 
-  let bestSelector = selector
-  let bestCount = elements.length
+  let bestSelector = selector;
+  let bestCount = elements.length;
 
   // Try with parents' ids
-  let parent = element.parentElement
+  let parent = element.parentElement;
   while (parent) {
     if (parent.id) {
-      const parentSelector = `#${cssEscape(parent.id)} ${selector}`
-      elements = safeQuerySelectorAll(parentSelector)
+      const parentSelector = `#${cssEscape(parent.id)} ${selector}`;
+      elements = safeQuerySelectorAll(parentSelector);
       if (elements.length === 1) {
-        return parentSelector
+        return parentSelector;
       }
       if (elements.length < bestCount) {
-        bestSelector = parentSelector
-        bestCount = elements.length
+        bestSelector = parentSelector;
+        bestCount = elements.length;
       }
     }
-    parent = parent.parentElement
+    parent = parent.parentElement;
   }
 
   // Try with parents' classes
-  const parentClasses = new Set<string>()
-  parent = element.parentElement
-  while (parent && parent.tagName !== 'BODY') {
+  const parentClasses = new Set<string>();
+  parent = element.parentElement;
+  while (parent && parent.tagName !== "BODY") {
     const classes = Array.from(parent.classList).filter(
       (className) => !parentClasses.has(className),
-    )
+    );
 
     for (const className of classes) {
-      const parentSelector = `.${cssEscape(className)} ${selector}`
-      elements = safeQuerySelectorAll(parentSelector)
+      const parentSelector = `.${cssEscape(className)} ${selector}`;
+      elements = safeQuerySelectorAll(parentSelector);
       if (elements.length === 1) {
-        return parentSelector
+        return parentSelector;
       }
       if (elements.length < bestCount) {
-        bestSelector = parentSelector
-        bestCount = elements.length
+        bestSelector = parentSelector;
+        bestCount = elements.length;
       }
-      parentClasses.add(className)
+      parentClasses.add(className);
     }
-    parent = parent.parentElement
+    parent = parent.parentElement;
   }
 
   // Try with all parents
-  parent = element.parentElement
-  let selectors = [selector]
-  while (parent && parent.tagName !== 'BODY') {
-    const newSelectors = []
+  parent = element.parentElement;
+  let selectors = [selector];
+  while (parent && parent.tagName !== "BODY") {
+    const newSelectors = [];
     for (const candidateSelector of selectors) {
-      const newSelector = `${parent.tagName.toLowerCase()} ${candidateSelector}`
-      newSelectors.push(newSelector)
-      elements = safeQuerySelectorAll(newSelector)
+      const newSelector = `${parent.tagName.toLowerCase()} ${candidateSelector}`;
+      newSelectors.push(newSelector);
+      elements = safeQuerySelectorAll(newSelector);
       if (elements.length === 1) {
-        return newSelector
+        return newSelector;
       }
       if (elements.length < bestCount) {
-        bestSelector = newSelector
-        bestCount = elements.length
+        bestSelector = newSelector;
+        bestCount = elements.length;
       }
     }
-    selectors = newSelectors
-    parent = parent.parentElement
+    selectors = newSelectors;
+    parent = parent.parentElement;
   }
 
   if (safeQuerySelectorAll(bestSelector).length === 0) {
-    return element.tagName.toLowerCase()
+    return element.tagName.toLowerCase();
   }
 
-  return bestSelector
+  return bestSelector;
 }
 
-function resolveDatastarRoot(): unknown {
-  const w = window as unknown as Record<string, unknown>
-  const candidates = [w?.datastar, w?.Datastar, w?.dataStar, w?.__datastar]
+async function resolveDatastarRoot(): Promise<unknown> {
+  // Datastar is an ES module and never attaches itself to window, so we
+  // can't access the `root` export directly. Instead we inject a hidden
+  // element with `data-json-signals`, which Datastar's attribute plugin
+  // uses to serialise the full signal store into textContent reactively.
+  // We wait a microtask for the plugin to run, read the JSON, then remove
+  // the element.
+  return new Promise((resolve) => {
+    const el = document.createElement("div");
+    el.setAttribute("data-json-signals", "");
+    el.style.display = "none";
+    document.body.appendChild(el);
 
-  for (const candidate of candidates) {
-    if (
-      candidate !== undefined &&
-      typeof candidate === 'object' &&
-      candidate !== null &&
-      'root' in candidate
-    ) {
-      return (candidate as Record<string, unknown>).root
-    }
-  }
-
-  return null
+    // One microtask is enough for Datastar's synchronous attribute walk to
+    // process the newly-inserted element and populate textContent.
+    Promise.resolve().then(() => {
+      const text = el.textContent ?? "null";
+      el.remove();
+      try {
+        resolve(JSON.parse(text));
+      } catch {
+        resolve(null);
+      }
+    });
+  });
 }
 
 export default defineUnlistedScript(() => {
@@ -181,23 +197,25 @@ export default defineUnlistedScript(() => {
   document.addEventListener(DATASTAR_FETCH_EVENT, ((
     event: CustomEvent<DSFetchDetail>,
   ) => {
-    const element = event.detail.el
-    const elementSelector = getUniqueSelector(element)
+    if (!event.detail?.replayed) {
+      const element = event.detail.el;
+      const elementSelector = getUniqueSelector(element);
 
-    postBridgeMessage({
-      source: DATASPA_DEVTOOLS,
-      version: PAGE_BRIDGE_VERSION,
-      type: DATASTAR_FETCH_EVENT,
-      payload: {
-        el: elementSelector,
-        data: safeJSONStringify({
-          type: event.detail.type,
-          argsRaw: event.detail.argsRaw,
+      postBridgeMessage({
+        source: DATASPA_DEVTOOLS,
+        version: PAGE_BRIDGE_VERSION,
+        type: DATASTAR_FETCH_EVENT,
+        payload: {
           el: elementSelector,
-        }),
-      },
-    })
-  }) as EventListener)
+          data: safeJSONStringify({
+            type: event.detail.type,
+            argsRaw: event.detail.argsRaw,
+            el: elementSelector,
+          }),
+        },
+      });
+    }
+  }) as EventListener);
 
   // Forward datastar-signal-patch events to the content script as raw JSON
   document.addEventListener(DATASTAR_SIGNAL_PATCH_EVENT, ((
@@ -210,33 +228,54 @@ export default defineUnlistedScript(() => {
       payload: {
         data: safeJSONStringify(event.detail),
       },
-    })
-  }) as EventListener)
+    });
+  }) as EventListener);
 
   // Respond to GET_SIGNAL_ROOT requests from the content script
-  window.addEventListener('message', (event: MessageEvent<unknown>) => {
-    if (event.source !== window) return
+  window.addEventListener("message", async (event: MessageEvent<unknown>) => {
+    if (event.source !== window) return;
     if (
-      typeof event.data !== 'object' ||
+      typeof event.data !== "object" ||
       event.data === null ||
       (event.data as Record<string, unknown>).source !== DATASPA_DEVTOOLS ||
-      (event.data as Record<string, unknown>).version !== PAGE_BRIDGE_VERSION ||
-      (event.data as Record<string, unknown>).type !== GET_SIGNAL_ROOT
+      (event.data as Record<string, unknown>).version !== PAGE_BRIDGE_VERSION
     ) {
-      return
+      return;
+    }
+    if (
+      (event.data as Record<string, unknown>).type !== GET_SIGNAL_ROOT &&
+      (event.data as Record<string, unknown>).type !== SAVE_SIGNAL
+    ) {
+      return;
     }
 
-    const root = resolveDatastarRoot()
-    const data = safeJSONStringify(root)
+    if ((event.data as Record<string, unknown>).type === GET_SIGNAL_ROOT) {
+      const root = await resolveDatastarRoot();
+      const data = safeJSONStringify(root);
 
-    postBridgeMessage({
-      source: DATASPA_DEVTOOLS,
-      version: PAGE_BRIDGE_VERSION,
-      type: GET_SIGNAL_ROOT_REPLY,
-      payload: {
-        data,
-        error: data === JSON.stringify(null) ? undefined : undefined,
-      },
-    })
-  })
-})
+      postBridgeMessage({
+        source: DATASPA_DEVTOOLS,
+        version: PAGE_BRIDGE_VERSION,
+        type: GET_SIGNAL_ROOT_REPLY,
+        payload: {
+          data,
+        },
+      });
+    }
+
+    if ((event.data as Record<string, unknown>).type === SAVE_SIGNAL) {
+      const signals = (event.data as SaveSignalMessage).data;
+      const evt = new CustomEvent(DATASTAR_FETCH_EVENT, {
+        detail: {
+          id: "save-signals",
+          replayed: true,
+          type: DATASTAR_PATCH_SIGNALS,
+          argsRaw: {
+            signals: JSON.stringify(signals),
+          },
+        } as SSEEvent,
+      });
+      document.dispatchEvent(evt);
+    }
+  });
+});

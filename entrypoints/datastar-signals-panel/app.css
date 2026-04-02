@@ -1,0 +1,36 @@
+.signal-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    /*grid-template-columns: minmax(120px, 1fr) 2fr;*/
+    font-size: 10px;
+    font-family: monospace;
+    margin-inline: 5px;
+}
+
+.signal-editor {
+    display: flex;
+    gap: 5px;
+}
+/* Span both columns for empty/loading state */
+.signal-empty {
+    grid-column: 1 / -1;
+    padding: 4px 2px;
+    font-style: italic;
+    color: #888;
+}
+
+.signal-key,
+.signal-value {
+    padding-block: 1px;
+    padding-inline: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.signal-value {
+    text-overflow: ellipsis;
+}
+
+.signal-key {
+    color: var(--wa-color-warning-700, #994500);
+}

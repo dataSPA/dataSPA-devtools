@@ -1,5 +1,6 @@
 type SSEEvent = {
   id: string;
+  replayed?: boolean;
   type: string;
   argsRaw?: {
     selector?: string;
@@ -10,8 +11,13 @@ type SSEEvent = {
   el?: string;
 };
 
+type SaveSignalMessage = {
+  path: string;
+  value: any;
+};
 type DSFetchDetail = {
   el: HTMLElement;
+  replayed?: boolean;
   argsRaw: object;
   type: string;
 };
@@ -144,4 +150,5 @@ export {
   type PanelPatchMessage,
   type PanelSignalMessage,
   type PanelMessage,
+  type SaveSignalMessage,
 };
